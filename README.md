@@ -1,2 +1,2 @@
-# engineering-thesis
+# My Engineering Thesis
 RL for discrete optimisation!
