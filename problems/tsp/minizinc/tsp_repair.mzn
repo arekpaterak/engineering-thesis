@@ -2,7 +2,7 @@ include "globals.mzn";
 
 int: Nodes;
 set of int: NUM = 1..Nodes;
-array[NUM,NUM] of int: Dist;
+array[NUM,NUM] of float: Dist;
 array[NUM] of var NUM: route;
 array[NUM] of 0..Nodes: fixed_route;
 

@@ -1,0 +1,1 @@
+Traveling Salesman Problem instances from Constraint Programming course at AGH University of Science and Technology in Kraków by Mateusz Ślażyński.

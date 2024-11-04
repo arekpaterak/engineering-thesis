@@ -18,6 +18,7 @@ class LNSEnvironment(ABC, gym.Env):
         init_model_path: str,
         repair_model_path: str,
         solver_name: str = "gecode",
+        max_episode_length: Optional[int] = None,
     ) -> None:
         solver = solver_cls(
             problem_path=problem_path,
@@ -27,6 +28,8 @@ class LNSEnvironment(ABC, gym.Env):
         )
         self.lns = LNS(solver=solver)
         self.problem = problem_cls.load_from_file(problem_path)
+        self.max_episode_length = max_episode_length
+        self.episode_length = 0
 
     def reset(
         self,
@@ -41,6 +44,8 @@ class LNSEnvironment(ABC, gym.Env):
             info (dict)
         """
         super().reset(seed=seed)
+
+        self.episode_length = 0
 
         solution = self.lns.reset()
 
@@ -61,6 +66,11 @@ class LNSEnvironment(ABC, gym.Env):
             info (dict)
         """
         solution, score, terminated, truncated = self.lns.step(action)
+
+        self.episode_length += 1
+        if self.max_episode_length:
+            if self.episode_length >= self.max_episode_length:
+                truncated = True
 
         observation = self._observation(solution)
         reward = self._reward(score)
