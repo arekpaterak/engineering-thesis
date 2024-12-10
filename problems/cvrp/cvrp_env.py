@@ -92,7 +92,7 @@ class CVRPEnvironment(LNSEnvironment):
         return result
 
     def _reward(self, score, action):
-        if self.is_action_expensive(action):
+        if self.is_action_desired(action):
             return score + self.EXPENSIVE_ACTION_PENALTY
         else:
             return score
@@ -122,7 +122,7 @@ class CVRPEnvironment(LNSEnvironment):
 
         return pyg.data.Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, pos=node_positions)
 
-    def is_action_expensive(self, action: list[int]) -> bool:
+    def is_action_desired(self, action: list[int]) -> bool:
         if self.expensive_action_threshold is None:
             return False
 

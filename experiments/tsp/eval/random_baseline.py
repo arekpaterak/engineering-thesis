@@ -78,6 +78,7 @@ if __name__ == '__main__':
                     "proportion": args.proportion,
                 }
             },
+            job_type="eval"
         )
 
     # ==== Seeding ====
@@ -90,7 +91,7 @@ if __name__ == '__main__':
         repair_model_path=TSP_REPAIR_SOLVER_PATH,
         solver_name=args.solver,
         max_episode_length=args.max_t,
-        expensive_action_threshold=None
+        action_bounds=None
     )
 
     proportion = args.proportion
@@ -140,7 +141,7 @@ if __name__ == '__main__':
     print(f"Measured time: {measured_time:.3f} s")
     print(f"Average time per one step: {(measured_time / step):.3f} s")
 
-    # ==== Save the best result ====
+    # ==== Update best results ====
     TSP_BEST_RESULTS_PATH = os.path.join(TSP_DATA_DIR, "best_results.csv")
 
     best_results = pd.read_csv(TSP_BEST_RESULTS_PATH)

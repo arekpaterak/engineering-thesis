@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import partial, wraps
 from types import MethodType
-from typing import Optional, List, Self, Dict
+from typing import Optional, List, Self, Dict, Tuple
 
 import numpy as np
 
@@ -18,7 +18,7 @@ from problems.tsp.tsp_lns import TSPSolver
 
 
 class TSPEnvironment(LNSEnvironment):
-    EXPENSIVE_ACTION_PENALTY: int = -1000
+    ACTION_PENALTY: int = -1000
 
     def __init__(
         self,
@@ -27,7 +27,7 @@ class TSPEnvironment(LNSEnvironment):
         repair_model_path: str,
         solver_name: str = "gecode",
         max_episode_length: Optional[int] = None,
-        expensive_action_threshold: Optional[float] = 0.5,
+        action_bounds: Optional[Tuple[float, float]] = (0.1, 0.5),
     ):
         super().__init__(
             problem_cls=TravelingSalesmanProblem,
@@ -39,7 +39,7 @@ class TSPEnvironment(LNSEnvironment):
             max_episode_length=max_episode_length,
         )
 
-        self.expensive_action_threshold = expensive_action_threshold
+        self.action_bounds = action_bounds
 
         num_nodes = self.problem.num_nodes
 
@@ -94,8 +94,8 @@ class TSPEnvironment(LNSEnvironment):
         return result
 
     def _reward(self, score, action):
-        if self.is_action_expensive(action):
-            return score + self.EXPENSIVE_ACTION_PENALTY
+        if not self.is_action_desired(action):
+            return score + self.ACTION_PENALTY
         else:
             return score
 
@@ -124,12 +124,12 @@ class TSPEnvironment(LNSEnvironment):
 
         return pyg.data.Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, pos=node_positions)
 
-    def is_action_expensive(self, action: list[int]) -> bool:
-        if self.expensive_action_threshold is None:
-            return False
+    def is_action_desired(self, action: list[int]) -> bool:
+        if self.action_bounds is None:
+            return True
 
         proportion = sum(action) / len(action)
-        return proportion > self.expensive_action_threshold
+        return self.action_bounds[0] <= proportion < self.action_bounds[1]
 
 
 if __name__ == "__main__":

@@ -66,7 +66,7 @@ class LNSEnvironment(ABC, gym.Env):
             "step_objective_value": None,
         }
 
-        if not self.is_action_expensive(action):
+        if self.is_action_desired(action):
             solution, score, terminated, truncated = self.lns.step(action)
         else:
             info["is_action_ignored"] = True
@@ -98,11 +98,11 @@ class LNSEnvironment(ABC, gym.Env):
         cls,
         problem_instances_paths: List[str],
         **kwargs
-    ) -> Dict[str, Self]:
-        envs = {}
+    ) -> List[Self]:
+        envs = []
         for problem_instance_path in problem_instances_paths:
             env = cls(problem_instance_path=problem_instance_path, **kwargs)
-            envs[problem_instance_path] = env
+            envs.append(env)
         return envs
 
     @staticmethod
@@ -111,5 +111,5 @@ class LNSEnvironment(ABC, gym.Env):
         pass
 
     @abstractmethod
-    def is_action_expensive(self, action) -> bool:
+    def is_action_desired(self, action) -> bool:
         pass
