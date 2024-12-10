@@ -13,11 +13,9 @@ import torch_geometric as pyg
 
 from general.lns_env import LNSEnvironment
 from general.utils import MultiBinaryWithLimitedSampling
-from problems.tsp.tsp import TravelingSalesmanProblem
-from problems.tsp.tsp_lns import TSPSolver
 
 
-class TSPEnvironment(LNSEnvironment):
+class CVRPEnvironment(LNSEnvironment):
     EXPENSIVE_ACTION_PENALTY: int = -1000
 
     def __init__(
@@ -62,7 +60,7 @@ class TSPEnvironment(LNSEnvironment):
 
         # ==== Action Space ====
         # self.action_space = gym.spaces.MultiBinary(num_nodes)
-        self.action_space: MultiBinaryWithLimitedSampling = MultiBinaryWithLimitedSampling(num_nodes)
+        self.action_space = MultiBinaryWithLimitedSampling(num_nodes)
 
         # Extend sampling with possibility to sample 1s on exactly n random positions
         # def add_new_arg_wrapper(method):
@@ -133,33 +131,4 @@ class TSPEnvironment(LNSEnvironment):
 
 
 if __name__ == "__main__":
-    problem_path = "data/generated/20_1000_0.json"
-    init_model_path = "minizinc/tsp_init.mzn"
-    repair_model_path = "minizinc/tsp_repair.mzn"
-    solver_name = "gecode"
-
-    env = TSPEnvironment(problem_path, init_model_path, repair_model_path, solver_name)
-    print(env.problem)
-
-    print("==== Observation Space ====")
-    print(env.observation_space)
-
-    print("==== Action Space ====")
-    print(env.action_space)
-
-    obs, _ = env.reset()
-    print(obs)
-
-    action = env.action_space.sample()
-    print(f"A sample action: {action}")
-
-    action = env.action_space.sample(k=4)
-    print(f"A restricted sample action: {action}")
-    obs = env.step(action)[0]
-    print(obs)
-
-    action = env.action_space.sample(k=15)
-    print(f"A restricted sample action: {action}")
-    obs, _, _, _, info = env.step(action)
-    print(obs)
-    print(info)
+    pass

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Self
+from typing import Self, Any
 
 import numpy as np
 
@@ -22,17 +22,19 @@ class TravelingSalesmanProblem(Problem):
     num_nodes: int
     node_positions: list[Position]
     distance_matrix: np.ndarray
+    config: dict[str, Any]
 
     @classmethod
     def load_from_file(cls, problem_path: str) -> Self:
         with open(problem_path, "r") as f:
             data = json.load(f)
 
-        num_nodes = data["Nodes"]
-        nodes_positions = [Position(position[0], position[1]) for position in data["NodePositions"]]
-        distance_matrix = np.array(data["Dist"])
+        num_nodes = data["nodes"]
+        nodes_positions = [Position(position[0], position[1]) for position in data["node_positions"]]
+        distance_matrix = np.array(data["dist"])
+        config = data["config"]
 
-        return cls(num_nodes, nodes_positions, distance_matrix)
+        return cls(num_nodes, nodes_positions, distance_matrix, config=config)
 
     @classmethod
     def generate(
@@ -41,6 +43,10 @@ class TravelingSalesmanProblem(Problem):
         max_coordinate: int
     ) -> Self:
         # TODO: Change to sampling from a unit square?
+
+        config = {
+            "max_coordinate": max_coordinate,
+        }
 
         node_positions = set()
         for _ in range(num_nodes):
@@ -58,7 +64,7 @@ class TravelingSalesmanProblem(Problem):
             for idx2, position2 in enumerate(node_positions):
                 distance_matrix[idx1, idx2] = position1.distanceTo(position2)
 
-        return cls(num_nodes, list(node_positions), distance_matrix)
+        return cls(num_nodes, list(node_positions), distance_matrix, config=config)
 
     def save(self, path: str, use_ints: bool = False) -> None:
         distance_matrix = self.distance_matrix
@@ -66,11 +72,12 @@ class TravelingSalesmanProblem(Problem):
             distance_matrix = distance_matrix.astype(int)
 
         data = {
-            "Nodes": self.num_nodes,
-            "NodePositions": [
+            "config": self.config,
+            "nodes": self.num_nodes,
+            "node_positions": [
                 [position.x, position.y] for position in self.node_positions
             ],
-            "Dist": distance_matrix.tolist(),
+            "dist": distance_matrix.tolist(),
         }
 
         with open(path, "w") as f:

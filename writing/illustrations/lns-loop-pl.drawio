@@ -1,0 +1,34 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36" version="24.8.6">
+  <diagram name="Page-1" id="Ve6AKhZev0prQEUSMhcG">
+    <mxGraphModel dx="1247" dy="671" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="Fns-NLv8KHA7JG8k3tlo-4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;fontFamily=Helvetica;" edge="1" parent="1" source="Fns-NLv8KHA7JG8k3tlo-2" target="Fns-NLv8KHA7JG8k3tlo-3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Fns-NLv8KHA7JG8k3tlo-2" value="Dopuszczalne&#xa;rozwiązanie" style="ellipse;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="390" y="365" width="100" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="Fns-NLv8KHA7JG8k3tlo-19" value="" style="edgeStyle=orthogonalEdgeStyle;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;fontFamily=Helvetica;" edge="1" parent="1" source="Fns-NLv8KHA7JG8k3tlo-3" target="Fns-NLv8KHA7JG8k3tlo-5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Fns-NLv8KHA7JG8k3tlo-3" value="Częściowe zniszczenie" style="whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=1;glass=0;shadow=0;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="550" y="385" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Fns-NLv8KHA7JG8k3tlo-9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;fontFamily=Helvetica;" edge="1" parent="1" source="Fns-NLv8KHA7JG8k3tlo-5" target="Fns-NLv8KHA7JG8k3tlo-8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Fns-NLv8KHA7JG8k3tlo-20" value="" style="edgeStyle=orthogonalEdgeStyle;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;fontFamily=Helvetica;" edge="1" parent="1" source="Fns-NLv8KHA7JG8k3tlo-5" target="Fns-NLv8KHA7JG8k3tlo-3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Fns-NLv8KHA7JG8k3tlo-5" value="Naprawa" style="whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=1;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="670" y="485" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Fns-NLv8KHA7JG8k3tlo-8" value="Rozwiązanie" style="ellipse;whiteSpace=wrap;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="860" y="465" width="100" height="100" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

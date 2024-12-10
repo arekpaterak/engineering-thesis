@@ -19,6 +19,7 @@ class Args:
     use_ints: bool = True
     seed: int | None = None
 
+
 if __name__ == '__main__':
     args = tyro.cli(Args)
 

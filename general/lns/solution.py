@@ -18,8 +18,6 @@ class CPPartialSolution(ABC):
 
 
 P = TypeVar("P", bound=CPPartialSolution)
-
-
 class CPSolution(ABC, Generic[P]):
 
     @property

@@ -48,16 +48,13 @@ class TSPSolution(CPSolution):
     def relax(self, action: list[int]) -> TSPPartialSolution:
         fixed_route = self.route.copy()
         indices_to_relax = action
-        for i in indices_to_relax:
-            fixed_route[i] = 0
+        for i, flag in enumerate(indices_to_relax):
+            if flag == 1:
+                fixed_route[i] = 0
         return TSPPartialSolution(self, fixed_route)
 
-    def score_against(self, other: Self):
-        # TODO
-        if self.is_better_than(other):
-            return 1
-        else:
-            return -1
+    def score_against(self, other: Self) -> int:
+        return other.objective_value - self.objective_value
 
 
 class TSPSolver(CPSolver[TSPSolution, TSPPartialSolution]):

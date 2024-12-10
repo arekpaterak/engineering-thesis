@@ -1,2 +1,2 @@
 # My Engineering Thesis
-RL for discrete optimisation!
+Reinforcement learning for discrete optimization.

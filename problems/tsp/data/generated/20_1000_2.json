@@ -1,6 +1,9 @@
 {
-    "Nodes": 20,
-    "NodePositions": [
+    "config": {
+        "max_coordinate": 1000
+    },
+    "nodes": 20,
+    "node_positions": [
         [
             537,
             881
@@ -82,7 +85,7 @@
             809
         ]
     ],
-    "Dist": [
+    "dist": [
         [
             0,
             580,
