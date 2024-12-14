@@ -18,7 +18,7 @@ import tyro
 import wandb
 
 from general.ml.features_extractor import GraphFeaturesExtractor
-from problems.tsp.tsp_env import TSPEnvironment
+from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
 
 @dataclass
 class Args:
@@ -85,13 +85,13 @@ if __name__ == '__main__':
     np.random.seed(args.seed)
 
     # ==== Environment Creation ====
-    env = TSPEnvironment(
+    env = TSPEnvironmentMultiBinary(
         problem_instance_path=problem_instances_paths[0],
         init_model_path=TSP_INIT_SOLVER_PATH,
         repair_model_path=TSP_REPAIR_SOLVER_PATH,
         solver_name=args.solver,
         max_episode_length=args.max_t,
-        action_bounds=None
+        action_bounds=None,
     )
 
     proportion = args.proportion

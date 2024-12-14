@@ -7,7 +7,7 @@ from torch import nn
 import torch_geometric as pyg
 from torch_geometric.nn import GATConv, GATv2Conv, Linear, Sequential
 
-from problems.tsp.tsp_env import TSPEnvironment
+from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
 
 
 class GraphFeaturesExtractor(nn.Module):
@@ -92,7 +92,7 @@ class SequentialGraphFeaturesExtractor(nn.Module):
 if __name__ == "__main__":
     observation = {'problem': {'node_positions': [{'x': 74, 'y': 528}, {'x': 658, 'y': 280}, {'x': 314, 'y': 534}, {'x': 160, 'y': 915}, {'x': 756, 'y': 153}, {'x': 841, 'y': 843}, {'x': 748, 'y': 954}, {'x': 995, 'y': 922}, {'x': 75, 'y': 1}, {'x': 139, 'y': 470}, {'x': 338, 'y': 176}, {'x': 973, 'y': 586}, {'x': 296, 'y': 844}, {'x': 820, 'y': 770}, {'x': 438, 'y': 229}, {'x': 742, 'y': 866}, {'x': 244, 'y': 638}, {'x': 962, 'y': 942}, {'x': 149, 'y': 403}, {'x': 412, 'y': 11}]}, 'solution': {'route': [1, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]}}
 
-    graph_data = TSPEnvironment.preprocess(observation)
+    graph_data = TSPEnvironmentMultiBinary.preprocess(observation)
 
     net = GraphFeaturesExtractor(in_channels=2, num_heads=8, edge_dim=1)
     print(pyg.nn.summary(net, graph_data.x, graph_data.edge_index, graph_data.edge_attr))

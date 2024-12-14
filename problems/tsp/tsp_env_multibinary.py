@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import partial, wraps
+from itertools import combinations
 from types import MethodType
 from typing import Optional, List, Self, Dict, Tuple
 
@@ -17,8 +18,7 @@ from problems.tsp.tsp import TravelingSalesmanProblem
 from problems.tsp.tsp_lns import TSPSolver
 
 
-class TSPEnvironment(LNSEnvironment):
-    ACTION_PENALTY: int = -1000
+class TSPEnvironmentMultiBinary(LNSEnvironment):
 
     def __init__(
         self,
@@ -28,6 +28,7 @@ class TSPEnvironment(LNSEnvironment):
         solver_name: str = "gecode",
         max_episode_length: Optional[int] = None,
         action_bounds: Optional[Tuple[float, float]] = (0.1, 0.5),
+        action_penalty: Optional[float] = -1000.0,
     ):
         super().__init__(
             problem_cls=TravelingSalesmanProblem,
@@ -40,6 +41,7 @@ class TSPEnvironment(LNSEnvironment):
         )
 
         self.action_bounds = action_bounds
+        self.action_penalty = action_penalty
 
         num_nodes = self.problem.num_nodes
 
@@ -61,26 +63,44 @@ class TSPEnvironment(LNSEnvironment):
         self.observation_space.sample = partial(self.observation_space.sample, mask={"problem": None, "solution" : {"route": (num_nodes, None)}})
 
         # ==== Action Space ====
-        # self.action_space = gym.spaces.MultiBinary(num_nodes)
         self.action_space: MultiBinaryWithLimitedSampling = MultiBinaryWithLimitedSampling(num_nodes)
 
-        # Extend sampling with possibility to sample 1s on exactly n random positions
-        # def add_new_arg_wrapper(method):
-        #     @wraps(method)
-        #     def wrapper(self, n=None):
-        #         if n:
-        #             size = self.shape[0]
-        #             action = np.zeros(size, dtype="int")
-        #             choices = np.random.choice(size, size=n, replace=False)
-        #             action[choices] = 1
-        #             return action
-        #         else:
-        #             return method(self)
-        #     return wrapper
-        # self.action_space.sample = MethodType(
-        #     add_new_arg_wrapper(gym.spaces.MultiBinary.sample),
-        #     self.action_space
-        # )
+    def step(self, action: np.ndarray):
+        """
+        Args:
+            action
+
+        Returns:
+            observation
+            reward
+            terminated (bool)
+            truncated (bool)
+            info (dict)
+        """
+        info = {
+            "is_action_ignored": False,
+            "best_objective_value": None,
+            "step_objective_value": None,
+        }
+
+        if self.is_action_desired(action):
+            solution, score, terminated, truncated = self.lns.step(action)
+        else:
+            info["is_action_ignored"] = True
+            solution, score, terminated, truncated = self.lns.best_solution, 0, False, False
+
+        self.episode_length += 1
+        if self.max_episode_length:
+            if self.episode_length >= self.max_episode_length:
+                truncated = True
+
+        observation = self._observation(solution)
+        reward = self._reward(score, action)
+
+        info["best_objective_value"] = self.lns.best_solution.objective_value
+        info["step_objective_value"] = self.lns.step_objective_value
+
+        return observation, reward, terminated, truncated, info
 
     def _observation(self, solution) -> dict:
         result = {
@@ -93,9 +113,9 @@ class TSPEnvironment(LNSEnvironment):
         }
         return result
 
-    def _reward(self, score, action):
+    def _reward(self, score, action: np.ndarray[int]):
         if not self.is_action_desired(action):
-            return score + self.ACTION_PENALTY
+            return score + self.action_penalty * sum(action)
         else:
             return score
 
@@ -124,7 +144,7 @@ class TSPEnvironment(LNSEnvironment):
 
         return pyg.data.Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, pos=node_positions)
 
-    def is_action_desired(self, action: list[int]) -> bool:
+    def is_action_desired(self, action: np.ndarray[int]) -> bool:
         if self.action_bounds is None:
             return True
 
@@ -138,7 +158,7 @@ if __name__ == "__main__":
     repair_model_path = "minizinc/tsp_repair.mzn"
     solver_name = "gecode"
 
-    env = TSPEnvironment(problem_path, init_model_path, repair_model_path, solver_name)
+    env = TSPEnvironmentMultiBinary(problem_path, init_model_path, repair_model_path, solver_name)
     print(env.problem)
 
     print("==== Observation Space ====")
@@ -148,18 +168,16 @@ if __name__ == "__main__":
     print(env.action_space)
 
     obs, _ = env.reset()
-    print(obs)
+    print(f"\nObservation:\n{obs}\n")
 
     action = env.action_space.sample()
     print(f"A sample action: {action}")
+    obs, _, _, _, info = env.step(action)
+    print(f"Observation:\n{obs}")
+    print(f"Info:\n{info}\n")
 
-    action = env.action_space.sample(k=4)
-    print(f"A restricted sample action: {action}")
-    obs = env.step(action)[0]
-    print(obs)
-
-    action = env.action_space.sample(k=15)
+    action = env.action_space.sample_limited(k=4)
     print(f"A restricted sample action: {action}")
     obs, _, _, _, info = env.step(action)
-    print(obs)
-    print(info)
+    print(f"Observation:\n{obs}")
+    print(f"Info:\n{info}")

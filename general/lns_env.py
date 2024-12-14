@@ -61,16 +61,11 @@ class LNSEnvironment(ABC, gym.Env):
             info (dict)
         """
         info = {
-            "is_action_ignored": False,
             "best_objective_value": None,
             "step_objective_value": None,
         }
 
-        if self.is_action_desired(action):
-            solution, score, terminated, truncated = self.lns.step(action)
-        else:
-            info["is_action_ignored"] = True
-            solution, score, terminated, truncated = self.lns.best_solution, 0, False, False
+        solution, score, terminated, truncated = self.lns.step(action)
 
         self.episode_length += 1
         if self.max_episode_length:
@@ -108,8 +103,4 @@ class LNSEnvironment(ABC, gym.Env):
     @staticmethod
     @abstractmethod
     def preprocess(observation: dict) -> pyg.data.Data:
-        pass
-
-    @abstractmethod
-    def is_action_desired(self, action) -> bool:
         pass

@@ -3,13 +3,15 @@ import time
 from collections import deque
 from dataclasses import dataclass
 import random
+from datetime import datetime
 from typing import Callable, Tuple, Optional
 
 import gymnasium
 import numpy as np
 import torch
 from torch import nn
-from torch.distributions import Bernoulli
+import torch.nn.functional as F
+from torch.distributions import Categorical
 
 import torch_geometric as pyg
 
@@ -19,14 +21,14 @@ import tyro
 import wandb
 
 from general.ml.features_extractor import GraphFeaturesExtractor
-from problems.tsp.tsp_env import TSPEnvironment
+from problems.tsp.tsp_env_discrete import TSPEnvironmentDiscrete
 
 
 @dataclass
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
-    seed: int = 1
+    seed: int = 42
     """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=True`"""
@@ -46,11 +48,7 @@ class Args:
     # Environment specific arguments
     max_t: Optional[int] = None
     """the maximum number of steps during one episode"""
-    low_action_bound: float = 0.1
-    """the threshold below which actions are ignored"""
-    high_action_bound: float = 0.5
-    """the threshold above which actions are ignored"""
-    n_envs: Optional[int] = None
+    n_instances: Optional[int] = None
     """how many problem instances to train on"""
 
     # Algorithm specific arguments
@@ -74,21 +72,22 @@ class Agent(nn.Module):
             **graph_features_extractor_kwargs
         )
         features_dim = self.features_extractor.features_dim
-        self.head = nn.Linear(features_dim, 1)
+        self.head = nn.Linear(features_dim, 4845)
 
         # ==== Optimizer ====
         self.optimizer = None
 
     def forward(self, x, edge_index, edge_attr=None) -> torch.Tensor:
         features = self.features_extractor(x, edge_index, edge_attr)
-        logits = self.head(features)
-        return torch.sigmoid(logits)
+        logits = self.head(features.mean(dim=0, keepdim=True))
+        return logits
 
     def get_action_with_log_prob(self, graph_data: pyg.data.Data) -> Tuple[torch.Tensor, torch.Tensor]:
         x, edge_index, edge_attr = graph_data.x, graph_data.edge_index, graph_data.edge_attr
 
-        probs = torch.flatten(self.forward(x, edge_index, edge_attr))
-        m = Bernoulli(probs)
+        logits = self.forward(x, edge_index, edge_attr)
+        probs = torch.softmax(logits, dim=1)
+        m = Categorical(probs)
         action = m.sample()
         return action, m.log_prob(action)
 
@@ -104,7 +103,7 @@ if __name__ == "__main__":
     TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init.mzn")
     TSP_REPAIR_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair.mzn")
 
-    run_name = f"TSP__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"TSP__{args.exp_name}__{args.seed}__{datetime.now().strftime('%Y-%m-%d_%H-%M')}"
 
     if args.track:
         wandb.init(
@@ -117,8 +116,7 @@ if __name__ == "__main__":
                     "init_solver": TSP_INIT_SOLVER_PATH,
                     "repair_solver": TSP_REPAIR_SOLVER_PATH,
                     "max_t": args.max_t,
-                    "low_action_bound": args.low_action_bound,
-                    "high_action_bound": args.high_action_bound,
+                    "n_envs": args.n_instances
                 },
                 "algorithm": {
                     "learning_rate": args.learning_rate,
@@ -135,76 +133,71 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    if args.debug:
+        print(f"Device: {device}")
 
     # ==== Environment Creation ====
     problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
 
-    envs = TSPEnvironment.create_multiple(
-        problem_instances_paths[:args.n_envs] if args.n_envs else problem_instances_paths,
+    envs = TSPEnvironmentDiscrete.create_multiple(
+        problem_instances_paths[:args.n_instances] if args.n_instances else problem_instances_paths,
         init_model_path=TSP_INIT_SOLVER_PATH,
         repair_model_path=TSP_REPAIR_SOLVER_PATH,
         solver_name="gecode",
         max_episode_length=args.max_t,
-        action_bounds=(args.low_action_bound, args.high_action_bound),
+        k=4,
     )
-
-    # env = TSPEnvironment(
-    #     problem_instance_path=problem_instances_paths[0],
-    #     init_model_path=TSP_INIT_SOLVER_PATH,
-    #     repair_model_path=TSP_REPAIR_SOLVER_PATH,
-    #     solver_name="gecode",
-    #     max_episode_length=args.max_t,
-    #     expensive_action_threshold=0.2
-    # )
 
     graph_features_extractor_kwargs = dict(
         in_channels=2,
         num_heads=8,
         edge_dim=1,
     )
-
     agent = Agent(
         graph_features_extractor_kwargs=graph_features_extractor_kwargs,
-    )
+    ).to(device)
     optimizer = torch.optim.Adam(agent.parameters(), lr=args.learning_rate)
 
     # Line 3 of pseudocode
     agent.train()
-    for epoch in range(1, args.n_epochs + 1):
+    for epoch in range(args.n_epochs):
         if args.debug:
-            print(f"Epoch {epoch:4}")
+            print(f"Epoch {epoch}")
+            epoch_start_time = time.time()
 
         avg_action_expense = torchmetrics.aggregation.MeanMetric()
         avg_ignored_actions = torchmetrics.aggregation.MeanMetric()
         avg_total_reward = torchmetrics.aggregation.MeanMetric()
         representative_instance_best_objective_value = None
 
-        for env_i, env in enumerate(envs):
+        for env_idx, env in enumerate(envs):
+            if args.debug:
+                print(f"Env {env_idx}")
+
             saved_log_probs = []
             saved_rewards = []
-
-            n_ignored_actions = 0
 
             observation, info = env.reset()
 
             # Line 4 of pseudocode
             for t in range(args.max_t):
-                graph_data = env.preprocess(observation)
+                graph_data = env.preprocess(observation).to(device)
+
                 action, log_prob = agent.get_action_with_log_prob(graph_data)
-                observation, reward, terminated, truncated, info = env.step(action.tolist())
+
+                observation, reward, terminated, truncated, info = env.step(action.cpu().item())
+
                 saved_log_probs.append(log_prob)
                 saved_rewards.append(reward)
 
-                if info["is_action_ignored"]:
-                    n_ignored_actions += 1
-
-                avg_action_expense.update(sum(action))
+                # ==== Logging ====
+                if args.debug and env_idx == args.representative_instance_idx:
+                    print(f"Action: {action.cpu().item():4} / {env.action_to_vector(action.cpu().item())}, Prob: {torch.exp(log_prob).item():.4f}, Step objective value: {info['step_objective_value']}")
 
                 if terminated or truncated:
                     break
 
             avg_total_reward.update(sum(saved_rewards))
-            avg_ignored_actions.update(n_ignored_actions)
 
             # Line 6 of pseudocode: calculate the return
             returns = deque(maxlen=args.max_t)
@@ -249,7 +242,7 @@ if __name__ == "__main__":
             returns = torch.tensor(returns)
             returns = (returns - returns.mean()) / (returns.std() + eps)
 
-            # Line 7:
+            # ==== Loss Calculation ====
             loss = []
             for log_prob, discounted_return in zip(saved_log_probs, returns):
                 loss.append(-log_prob * discounted_return)
@@ -259,31 +252,24 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
 
-            if env_i == 0:
+            if env_idx == args.representative_instance_idx:
                 representative_instance_best_objective_value = info["best_objective_value"]
+            if args.debug and env_idx == args.representative_instance_idx:
+                print(f"Loss: {loss.item():.4f}")
 
-        if args.track:
-            wandb.log(
-                {
-                    "avg_total_reward": avg_total_reward.compute(),
-                    "best_objective_value_for_representative_instance": representative_instance_best_objective_value,
-                    "avg_ignored_actions": avg_ignored_actions.compute(),
-                    "avg_action_expense": avg_action_expense.compute(),
-                }
-            )
-
+        # ==== Logging ====
+        logs = {
+            "avg_total_reward": avg_total_reward.compute(),
+            "best_objective_value_for_representative_instance": representative_instance_best_objective_value,
+        }
         if args.debug:
-            print(
-                {
-                    "avg_total_reward": avg_total_reward.compute(),
-                    "best_objective_value_for_representative_instance": representative_instance_best_objective_value,
-                    "avg_ignored_actions": avg_ignored_actions.compute(),
-                    "avg_action_expense": avg_action_expense.compute(),
-                }
-            )
+            print(logs)
+            print(f"Time: {(time.time() - epoch_start_time):.2f} s")
+        if args.track:
+            wandb.log(logs)
 
+    # ==== Saving the model ====
     if args.track:
-        # ==== Saving the model ====
         model_path = os.path.join(wandb.run.dir, "model.pt")
         torch.save(agent.state_dict(), model_path)
 

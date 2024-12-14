@@ -19,7 +19,7 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GATConv
 
-from problems.tsp.tsp_env import TSPEnvironment
+from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
 
 
 @dataclass
@@ -88,7 +88,7 @@ class Args:
 
 def make_env(env_id):
     def thunk():
-        env = TSPEnvironment(
+        env = TSPEnvironmentMultiBinary(
             problem_instance_path="problems/tsp/data/generated/20_1000_0.json",
             init_model_path="problems/tsp/minizinc/tsp_init.mzn",
             repair_model_path="problems/tsp/minizinc/tsp_repair.mzn",
