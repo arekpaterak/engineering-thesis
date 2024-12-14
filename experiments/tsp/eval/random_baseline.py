@@ -39,9 +39,11 @@ class Args:
     max_t: Optional[int] = None
     """the maximum number of steps during one episode"""
     solver: str = "gecode"
+    """the solver to use to find an initial solution and repair the subsequent"""
 
     # Algorithm specific arguments
     proportion: float = 0.2
+    """the proportion of the nodes in the problem to destroy in one step"""
 
 
 if __name__ == '__main__':

@@ -8,8 +8,10 @@ from typing import Callable, Tuple, Optional
 
 import gymnasium
 import numpy as np
+
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.distributions import Bernoulli
 
 import torch_geometric as pyg
@@ -55,6 +57,8 @@ class Args:
     """how many problem instances to train on"""
     action_penalty: Optional[float] = -100.0
     """the penalty for an expensive action"""
+    solver: str = "gecode"
+    """the solver to use to find an initial solution and repair the subsequent"""
 
     # Algorithm specific arguments
     learning_rate: float = 1e-3
@@ -64,6 +68,11 @@ class Args:
     n_epochs: int = 1
     """the number of epochs"""
     entropy_coefficient: float = 0.01
+    """the entropy coefficient for the entropy regularization"""
+    proportion: float = 0.2
+    """the proportion of the nodes in the problem to destroy in one step"""
+    max_grad_norm: Optional[float] = None
+    """the maximum norm for gradient clipping"""
 
 
 class Agent(nn.Module):
@@ -88,24 +97,21 @@ class Agent(nn.Module):
         logits = self.head(features)
         return torch.flatten(logits)
 
-    def get_action_with_log_prob(self, graph_data: pyg.data.Data) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_action_with_log_prob(self, graph_data: pyg.data.Data, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
         x, edge_index, edge_attr = graph_data.x, graph_data.edge_index, graph_data.edge_attr
 
-        prob = torch.sigmoid(self.forward(x, edge_index, edge_attr))
-        log_prob = torch.log(prob)
+        logits = self.forward(x, edge_index, edge_attr)
 
-        n = prob.shape[0]
-        action_idx = prob.multinomial(num_samples=4).detach()
-        action = torch.zeros(n)
+        prob = torch.sigmoid(logits)
+        log_prob = torch.log(prob)
+        action_idx = prob.multinomial(num_samples=k).detach()
+
+        action = torch.zeros(logits.shape[0])
         action[action_idx] = 1
 
         log_prob = log_prob.gather(0, action_idx)
 
-        return action, log_prob
-
-        # m = Bernoulli(prob)
-        # action = m.sample()
-        # return action, m.log_prob(action)
+        return action, log_prob.sum(-1, keepdim=True)
 
 
 if __name__ == "__main__":
@@ -136,169 +142,141 @@ if __name__ == "__main__":
                     "low_action_bound": args.low_action_bound,
                     "high_action_bound": args.high_action_bound,
                     "action_penalty": args.action_penalty,
+                    "solver": args.solver,
                 },
                 "algorithm": {
                     "learning_rate": args.learning_rate,
                     "gamma": args.gamma,
                     "n_epochs": args.n_epochs,
-                    "entropy_coefficient": args.entropy_coefficient
+                    "entropy_coefficient": args.entropy_coefficient,
+                    "proportion": args.proportion,
+                    "max_grad_norm": args.max_grad_norm,
                 }
             },
             job_type="train"
         )
+
+    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    if args.debug:
+        print(f"Device: {device}")
 
     # ==== Seeding ====
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-    if args.debug:
-        print(f"Device: {device}")
-
-    # ==== Environment Creation ====
+    # ==== Environments Creation ====
     problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
 
     envs = TSPEnvironmentMultiBinary.create_multiple(
         problem_instances_paths[:args.n_instances] if args.n_instances else problem_instances_paths,
         init_model_path=TSP_INIT_SOLVER_PATH,
         repair_model_path=TSP_REPAIR_SOLVER_PATH,
-        solver_name="gecode",
+        solver_name=args.solver,
         max_episode_length=args.max_t,
         action_bounds=(args.low_action_bound, args.high_action_bound),
         action_penalty=args.action_penalty,
     )
 
+    # ==== Model Creation ====
     graph_features_extractor_kwargs = dict(
         in_channels=2,
         num_heads=8,
         edge_dim=1,
     )
-    agent = Agent(
+    model = Agent(
         graph_features_extractor_kwargs=graph_features_extractor_kwargs,
     ).to(device)
-    optimizer = torch.optim.Adam(agent.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
-    # Line 3 of pseudocode
-    agent.train()
+    # ==== Training ====
+    model.train()
     for epoch in range(1, args.n_epochs + 1):
         if args.debug:
             print(f"Epoch {epoch:4}")
             epoch_start_time = time.time()
 
+        avg_total_reward = torchmetrics.aggregation.MeanMetric()
         avg_action_expense = torchmetrics.aggregation.MeanMetric()
         avg_ignored_actions = torchmetrics.aggregation.MeanMetric()
-        avg_total_reward = torchmetrics.aggregation.MeanMetric()
         representative_instance_best_objective_value = None
 
         for env_idx, env in enumerate(envs):
             if args.debug:
                 print(f"Env {env_idx}")
 
-            saved_log_probs = []
-            saved_rewards = []
+            k = int(env.problem.num_nodes * args.proportion)
+
+            log_probs = []
+            rewards = []
+            entropies = []
 
             n_ignored_actions = 0
 
+            # ==== One Trajectory Acquisition ====
             observation, info = env.reset()
-
-            # Line 4 of pseudocode
             for t in range(args.max_t):
                 graph_data = env.preprocess(observation).to(device)
 
-                action, log_prob = agent.get_action_with_log_prob(graph_data)
-                action = action.detach().cpu().numpy()
-
+                action, log_prob = model.get_action_with_log_prob(graph_data, k=k)
+                action = action.cpu().numpy()
                 observation, reward, terminated, truncated, info = env.step(action)
 
-                saved_log_probs.append(log_prob)
-                saved_rewards.append(reward)
+                prob = torch.exp(log_prob)
+                entropy = -(prob * log_prob + (1 - prob) * torch.log(1 - prob))
+                log_probs.append(log_prob)
+                rewards.append(reward)
+                entropies.append(entropy)
 
+                # ==== Logging ====
                 if info["is_action_ignored"]:
                     n_ignored_actions += 1
                 avg_action_expense.update(sum(action))
 
-                # ==== Logging ====
                 if args.debug and env_idx == args.representative_instance_idx:
                     log_prob = log_prob.detach().cpu()
-                    prob = torch.exp(log_prob.sum()).item()
-                    print(f"Action: {action}, Log(Prob): {log_prob.sum():.4f}, Prob: {prob:.4f}, Step objective value: {info['step_objective_value']}, Action expense: {sum(action)}")
+                    prob = torch.exp(log_prob).item()
+                    print(f"Step {t:3}, Action: {action}, Log(Prob): {log_prob.sum():.4f}, Prob: {prob:.4f}, Step objective value: {info['step_objective_value']}, Action expense: {sum(action)}")
 
                 if terminated or truncated:
                     break
 
-            avg_total_reward.update(sum(saved_rewards))
-            avg_ignored_actions.update(n_ignored_actions)
-
-            # Line 6 of pseudocode: calculate the return
+            # ==== Returns Calculation ====
             returns = deque(maxlen=args.max_t)
-            n_steps = len(saved_rewards)
-            # Compute the discounted returns at each timestep,
-            # as
-            #      the sum of the gamma-discounted return at time t (G_t) + the reward at time t
-            #
-            # In O(N) time, where N is the number of time steps
-            # (this definition of the discounted return G_t follows the definition of this quantity
-            # shown at page 44 of Sutton&Barto 2017 2nd draft)
-            # G_t = r_(t+1) + r_(t+2) + ...
-
-            # Given this formulation, the returns at each timestep t can be computed
-            # by re-using the computed future returns G_(t+1) to compute the current return G_t
-            # G_t = r_(t+1) + gamma*G_(t+1)
-            # G_(t-1) = r_t + gamma* G_t
-            # (this follows a dynamic programming approach, with which we memorize solutions in order
-            # to avoid computing them multiple times)
-
-            # This is correct since the above is equivalent to (see also page 46 of Sutton&Barto 2017 2nd draft)
-            # G_(t-1) = r_t + gamma*r_(t+1) + gamma*gamma*r_(t+2) + ...
-
-            ## Given the above, we calculate the returns at timestep t as:
-            #               gamma[t] * return[t] + reward[t]
-            #
-            ## We compute this starting from the last timestep to the first, in order
-            ## to employ the formula presented above and avoid redundant computations that would be needed
-            ## if we were to do it from first to last.
-
-            ## Hence, the queue "returns" will hold the returns in chronological order, from t=0 to t=n_steps
-            ## thanks to the appendleft() function which allows to append to the position 0 in constant time O(1)
-            ## a normal python list would instead require O(N) to do this.
-            for t in range(n_steps)[::-1]:
+            for t in reversed(range(len(rewards))):
                 discounted_return_t = returns[0] if len(returns) > 0 else 0
-                returns.appendleft(args.gamma * discounted_return_t + saved_rewards[t])
+                returns.appendleft(args.gamma * discounted_return_t + rewards[t])
 
-            ## normalization of the returns is employed to make training more stable
-            ## eps is the smallest representable float, which is
-            # added to the standard deviation of the returns to avoid numerical instabilities
+            # ==== Returns Normalization ====
             eps = np.finfo(np.float32).eps.item()
             returns = torch.tensor(returns)
             returns = (returns - returns.mean()) / (returns.std() + eps)
 
             # ==== Loss Calculation ====
             loss = []
-            entropy_loss = []
-            for log_prob, discounted_return in zip(saved_log_probs, returns):
-                # Policy loss
-                policy_loss = -log_prob * discounted_return
-                loss.append(policy_loss)
-
-                # # Entropy regularization
-                prob = torch.exp(log_prob)
-                entropy = -(prob * log_prob + (1 - prob) * torch.log(1 - prob + eps))
-                entropy_loss.append(entropy)
+            for log_prob, discounted_return in zip(log_probs, returns):
+                loss.append(-log_prob * discounted_return)
 
             loss = torch.cat(loss).sum()
-            entropy_loss = torch.cat(entropy_loss).sum()
-            total_loss = loss - args.entropy_coefficient * entropy_loss
+            entropy = torch.cat(entropies).sum()
+            total_loss = -loss - args.entropy_coefficient * entropy
 
+            # ==== Policy Update ====
             optimizer.zero_grad()
             total_loss.backward()
+            if args.max_grad_norm:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
             optimizer.step()
 
+            # ==== Logging ====
+            avg_total_reward.update(sum(rewards))
+            avg_ignored_actions.update(n_ignored_actions)
             if env_idx == args.representative_instance_idx:
                 representative_instance_best_objective_value = info["best_objective_value"]
             if args.debug and env_idx == args.representative_instance_idx:
                 print(f"Loss: {loss.item():.4f}")
-                print(f"Entropy loss: {entropy_loss.item():.4f}")
+                print(f"Entropy: {entropy.item():.4f}")
+                print(f"Total Loss: {total_loss.item():.4f}")
 
         # ==== Logging ====
         logs = {
@@ -316,7 +294,7 @@ if __name__ == "__main__":
     # ==== Saving the model ====
     if args.track:
         model_path = os.path.join(wandb.run.dir, "model.pt")
-        torch.save(agent.state_dict(), model_path)
+        torch.save(model.state_dict(), model_path)
 
         artifact = wandb.Artifact("model", type="model")
         artifact.add_file(model_path)
