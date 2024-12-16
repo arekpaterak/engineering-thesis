@@ -32,6 +32,8 @@ class Args:
     """seed of the experiment"""
     debug: bool = True
     """if toggled, extra logs will be printed to the console"""
+    log_every_n_step: int = 10
+    """the logging interval"""
 
     # Environment specific arguments
     max_t: Optional[int] = None
@@ -95,29 +97,27 @@ if __name__ == '__main__':
         if args.debug:
            print(f"Initial solution objective value: {initial_objective_value}")
 
-        episode_time = 0.0
-
         step = 0
+        episode_time = 0.0
         done = False
         while not done:
             step_start_time = time.perf_counter()
 
             action = env.action_space.sample_limited(k=k)
-
             obs, reward, terminated, truncated, info = env.step(action)
-
             done = terminated or truncated
 
             episode_time += time.perf_counter() - step_start_time
 
+            # ==== Logging ====
             if args.debug:
                 print(f"Step {step}")
                 print(f"Reward {reward}, Step Objective Value {info['step_objective_value']}")
 
             step += 1
 
-            # ==== Update the best results ====
-            if step % 10 == 0:
+            # ==== Save to the best results ====
+            if step % args.log_every_n_step == 0 or step < 10:
                 TSP_BEST_RESULTS_PATH = os.path.join(BASE_PATH, "problems", "tsp", "data", "best_results.csv")
                 method_name = f"random({args.proportion})"
 
@@ -132,6 +132,7 @@ if __name__ == '__main__':
                     "initial_objective_value": initial_objective_value,
                     "objective_value": info["best_objective_value"],
                     "time": f"{episode_time:.3f}",
+                    "avg_time_per_step": f"{(episode_time / step):.3f}"
                 }
                 df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
 

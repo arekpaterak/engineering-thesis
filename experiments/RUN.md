@@ -33,7 +33,7 @@ python -m experiments.tsp.eval.random_baseline --max-t 300 --proportion 0.5 --in
 
 Evaluate the adaptive baseline on TSP:
 ```
-TODO
+python -m experiments.tsp.eval.adaptive_baseline --max-t 50 --initial-proportion 0.1 --adaptation-rate 0.05 --adaptation-timelimit-in-s 10 --instance-name 20_1000_0 --instances-dir-name train
 ```
 
 ### CVRP
