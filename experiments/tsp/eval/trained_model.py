@@ -1,0 +1,189 @@
+import os
+import random
+import time
+from dataclasses import dataclass
+from math import atan2
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+import torch
+import tyro
+import wandb
+
+from experiments.tsp.train.reinforce_multibinary import Agent
+from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
+
+
+@dataclass
+class Args:
+    instance_name: Optional[str] = None
+    """the instance on which the method will be run"""
+    instances_dir_name: str = "train"
+    """the name of instances directory"""
+    seed: int = 1
+    """seed of the experiment"""
+    torch_deterministic: bool = True
+    """if toggled, `torch.backends.cudnn.deterministic=True`"""
+    wandb_project_name: str = "engineering-thesis"
+    """the wandb's project name"""
+    wandb_entity: Optional[str] = None
+    """the entity (team) of wandb's project"""
+    cuda: bool = True
+    """if toggled, cuda will be enabled by default"""
+    debug: bool = True
+    """if toggled, extra logs will be printed to the console"""
+    log_every_n_step: int = 10
+    """the logging interval"""
+
+    # Environment specific arguments
+    max_t: Optional[int] = None
+    """the maximum number of steps during one episode"""
+    solver: str = "gecode"
+    """the solver to use to find an initial solution and repair the subsequent"""
+
+    # Algorithm specific arguments
+    proportion: float = 0.2
+    """the proportion of the nodes in the problem to destroy in one step"""
+
+
+if __name__ == '__main__':
+    args = tyro.cli(Args)
+
+    BASE_PATH = "D:\\Coding\\University\\S7\\engineering-thesis"
+
+    TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", args.instances_dir_name)
+
+    TSP_SOLVERS_DIR = os.path.join(BASE_PATH, "problems", "tsp", "minizinc")
+    TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init.mzn")
+    TSP_REPAIR_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair.mzn")
+
+    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    if args.debug:
+        print(f"Device: {device}")
+
+    if args.instance_name:
+        problem_instances_paths = [os.path.join(TSP_DATA_DIR, f"{args.instance_name}.json")]
+    else:
+        problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
+
+    # ==== Loading the model ====
+    wandb_api = wandb.Api()
+    artifact = wandb_api.artifact(f"{args.wandb_project_name}/model-{args.proportion}:latest")
+    artifact_dir = artifact.download()
+
+    model_path = os.path.join(artifact_dir, "model.pt")
+
+    graph_features_extractor_kwargs = dict(
+        in_channels=2,
+        num_heads=8,
+        edge_dim=1,
+    )
+    model = Agent(
+        graph_features_extractor_kwargs=graph_features_extractor_kwargs,
+    )
+    model.load_state_dict(torch.load(model_path, weights_only=True))
+    model.to(device)
+    model.eval()
+
+    # ==== Loop over problem instances ====
+    for instance_idx, instance_path in enumerate(problem_instances_paths):
+
+        # ==== Seeding ====
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        torch.backends.cudnn.deterministic = args.torch_deterministic
+
+        instance_name = os.path.basename(instance_path).rstrip(".json")
+
+        if args.debug:
+            print(f"Instance {instance_idx}: {instance_name}")
+
+        # ==== Environment Creation ====
+        env = TSPEnvironmentMultiBinary(
+            problem_instance_path=instance_path,
+            init_model_path=TSP_INIT_SOLVER_PATH,
+            repair_model_path=TSP_REPAIR_SOLVER_PATH,
+            solver_name=args.solver,
+            max_episode_length=args.max_t,
+            action_bounds=None,
+        )
+
+        proportion = args.proportion
+        if proportion <= 0.0 or proportion > 1.0:
+            raise ValueError("proportion must be between 0.0 and 1.0")
+        k = int(env.problem.num_nodes * proportion)
+
+        # ==== Main Loop ====
+        observation, info = env.reset()
+
+        initial_objective_value = info["best_objective_value"]
+        if args.debug:
+           print(f"Initial solution objective value: {initial_objective_value}")
+
+        step = 0
+        episode_time = 0.0
+        while True:
+            step_start_time = time.perf_counter()
+
+            graph_data = env.preprocess(observation).to(device)
+
+            action, log_prob = model.get_action(graph_data, k=k)
+            action = action.cpu().numpy()
+            observation, reward, terminated, truncated, info = env.step(action)
+
+            episode_time += time.perf_counter() - step_start_time
+
+            # ==== Logging ====
+            if args.debug:
+                print(f"Step {step}")
+                print(f"Reward {reward}, Step Objective Value {info['step_objective_value']}, Proportion {proportion}")
+
+            step += 1
+
+            # ==== Save to the best results ====
+            if step % args.log_every_n_step == 0 or step < 10:
+                TSP_BEST_RESULTS_PATH = os.path.join(BASE_PATH, "problems", "tsp", "data", "best_results.csv")
+                method_name = f"model({args.proportion})"
+
+                df = pd.read_csv(TSP_BEST_RESULTS_PATH)
+
+                new_record = {
+                    "instance": instance_name,
+                    "subset": "test" if "test" in args.instances_dir_name else "train",
+                    "method": method_name,
+                    "seed": args.seed,
+                    "steps": step,
+                    "initial_objective_value": initial_objective_value,
+                    "objective_value": info["best_objective_value"],
+                    "time": f"{episode_time:.3f}",
+                    "avg_time_per_step": f"{(episode_time / step):.3f}"
+                }
+                matching_record = df[
+                    (df['instance'] == new_record['instance']) &
+                    (df['subset'] == new_record['subset']) &
+                    (df['method'] == new_record['method']) &
+                    (df['seed'] == new_record['seed']) &
+                    (df['steps'] == new_record['steps'])
+                ]
+
+                if not matching_record.empty:
+                    idx = matching_record.index[0]
+                    for key, value in new_record.items():
+                        df.loc[idx, key] = value
+                else:
+                    df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
+
+                df.to_csv(TSP_BEST_RESULTS_PATH, index=False)
+
+                if args.debug:
+                    print(f"Solution: {env.lns.best_solution.route}")
+                    print(f"Objective value: {info['best_objective_value']}")
+                    print(f"Measured time: {episode_time:.3f} s")
+                    print(f"Average time per one step: {(episode_time / step):.3f} s")
+
+            if terminated or truncated:
+                break
+
+    wandb.finish()

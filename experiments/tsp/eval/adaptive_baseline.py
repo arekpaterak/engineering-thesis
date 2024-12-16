@@ -1,33 +1,21 @@
 import os
-import time
-from collections import deque
-from dataclasses import dataclass
 import random
-from typing import Callable, Tuple, Optional
+import time
+from dataclasses import dataclass
+from typing import Optional
 
-import gymnasium
 import numpy as np
 import pandas as pd
-import torch
-import torchmetrics.aggregation
-from torch import nn
-from torch.distributed.pipeline.sync.checkpoint import checkpoint
-from torch.distributions import Bernoulli
-
-import torch_geometric as pyg
-
 import tyro
-import wandb
 
-from experiments.playground import action
-from general.ml.features_extractor import GraphFeaturesExtractor
 from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
+
 
 @dataclass
 class Args:
     instance_name: Optional[str] = None
     """the instance on which the method will be run"""
-    instances_dir_name: Optional[str] = None
+    instances_dir_name: str = "train"
     """the name of instances directory"""
     seed: int = 1
     """seed of the experiment"""
@@ -61,7 +49,6 @@ if __name__ == '__main__':
     TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init.mzn")
     TSP_REPAIR_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair.mzn")
 
-    # ==== Environment Creation ====
     if args.instance_name is None:
         problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
     else:
@@ -144,8 +131,22 @@ if __name__ == '__main__':
                     "initial_objective_value": initial_objective_value,
                     "objective_value": info["best_objective_value"],
                     "time": f"{episode_time:.3f}",
+                    "avg_time_per_step": f"{(episode_time / step):.3f}"
                 }
-                df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
+                matching_record = df[
+                    (df['instance'] == new_record['instance']) &
+                    (df['subset'] == new_record['subset']) &
+                    (df['method'] == new_record['method']) &
+                    (df['seed'] == new_record['seed']) &
+                    (df['steps'] == new_record['steps'])
+                ]
+
+                if not matching_record.empty:
+                    idx = matching_record.index[0]
+                    for key, value in new_record.items():
+                        df.loc[idx, key] = value
+                else:
+                    df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
 
                 df.to_csv(TSP_BEST_RESULTS_PATH, index=False)
 

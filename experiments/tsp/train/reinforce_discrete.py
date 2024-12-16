@@ -44,6 +44,8 @@ class Args:
     """if toggled, extra logs will be printed to the console"""
     representative_instance_idx: int = 0
     """the id of the representative instance for logging"""
+    save_every_n_epochs: int = 10
+    """how often to save the model"""
 
     # Environment specific arguments
     max_t: Optional[int] = None
@@ -268,13 +270,13 @@ if __name__ == "__main__":
         if args.track:
             wandb.log(logs)
 
-    # ==== Saving the model ====
-    if args.track:
-        model_path = os.path.join(wandb.run.dir, "model.pt")
-        torch.save(agent.state_dict(), model_path)
+        # ==== Saving the model ====
+        if args.track and epoch % args.save_every_n_epochs == 0:
+            model_path = os.path.join(wandb.run.dir, "model.pt")
+            torch.save(agent.state_dict(), model_path)
 
-        artifact = wandb.Artifact("model", type="model")
-        artifact.add_file(model_path)
-        wandb.log_artifact(artifact)
+            artifact = wandb.Artifact("model", type="model")
+            artifact.add_file(model_path)
+            wandb.log_artifact(artifact)
 
-        wandb.finish()
+            wandb.finish()

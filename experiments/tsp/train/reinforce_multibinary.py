@@ -45,6 +45,8 @@ class Args:
     """if toggled, extra logs will be printed to the console"""
     representative_instance_idx: int = 0
     """the id of the representative instance for logging"""
+    save_every_n_epochs: int = 10
+    """how often to save the model"""
 
     # Environment specific arguments
     max_t: Optional[int] = None
@@ -113,7 +115,7 @@ if __name__ == "__main__":
 
     BASE_PATH = "D:\\Coding\\University\\S7\\engineering-thesis"
 
-    TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", "generated")
+    TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", "train")
 
     TSP_SOLVERS_DIR = os.path.join(BASE_PATH, "problems", "tsp", "minizinc")
     TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init.mzn")
@@ -134,9 +136,6 @@ if __name__ == "__main__":
                     "repair_solver": TSP_REPAIR_SOLVER_PATH,
                     "max_t": args.max_t,
                     "n_envs": args.n_instances,
-                    "low_action_bound": args.low_action_bound,
-                    "high_action_bound": args.high_action_bound,
-                    "action_penalty": args.action_penalty,
                     "solver": args.solver,
                 },
                 "algorithm": {
@@ -172,8 +171,6 @@ if __name__ == "__main__":
         repair_model_path=TSP_REPAIR_SOLVER_PATH,
         solver_name=args.solver,
         max_episode_length=args.max_t,
-        action_bounds=(args.low_action_bound, args.high_action_bound),
-        action_penalty=args.action_penalty,
     )
 
     # ==== Model Creation ====
@@ -189,7 +186,7 @@ if __name__ == "__main__":
 
     # ==== Training ====
     model.train()
-    for epoch in range(1, args.n_epochs + 1):
+    for epoch in range(0, args.n_epochs):
         if args.debug:
             print(f"Epoch {epoch:4}")
             epoch_start_time = time.time()
@@ -289,13 +286,13 @@ if __name__ == "__main__":
         # ==== Logging ====
         logs = {
             "avg_total_reward": avg_total_reward.compute(),
+            "avg_best_objective_value": avg_best_objective_value.compute(),
             "best_objective_value_for_representative_instance": representative_instance_best_objective_value,
             # "avg_ignored_actions": avg_ignored_actions.compute(),
             # "avg_action_expense": avg_action_expense.compute(),
             "avg_policy_loss": avg_policy_loss.compute(),
             "avg_entropy_loss": avg_entropy_loss.compute(),
             "avg_total_loss": avg_total_loss.compute(),
-            "avg_best_objective_value": avg_best_objective_value.compute(),
         }
         if args.debug:
             print(logs)
@@ -303,13 +300,15 @@ if __name__ == "__main__":
         if args.track:
             wandb.log(logs)
 
-    # ==== Saving the model ====
+        # ==== Saving the model ====
+        if args.track and ((epoch + 1) % args.save_every_n_epochs == 0 or (epoch + 1) == args.n_epochs):
+            print("Saving the model...")
+            model_path = os.path.join(wandb.run.dir, "model.pt")
+            torch.save(model.state_dict(), model_path)
+
+            artifact = wandb.Artifact(f"model-{args.proportion}", type="model")
+            artifact.add_file(model_path)
+            wandb.log_artifact(artifact)
+
     if args.track:
-        model_path = os.path.join(wandb.run.dir, "model.pt")
-        torch.save(model.state_dict(), model_path)
-
-        artifact = wandb.Artifact("model", type="model")
-        artifact.add_file(model_path)
-        wandb.log_artifact(artifact)
-
         wandb.finish()
