@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 import tyro
@@ -17,14 +18,13 @@ class Args:
     dir: str = os.path.join(BASE_DIR, "data", "generated")
     starting_n: int = 0
     use_ints: bool = True
-    seed: int | None = None
+    seed: int = 13
 
 
 if __name__ == '__main__':
     args = tyro.cli(Args)
 
-    if args.seed:
-        np.random.seed(args.seed)
+    np.random.seed(args.seed)
 
     for instance_n in range(args.n):
         filename = f"{args.num_nodes}_{args.max_coordinate}_{args.starting_n + instance_n}.json"

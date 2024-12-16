@@ -49,14 +49,8 @@ class Args:
     # Environment specific arguments
     max_t: Optional[int] = None
     """the maximum number of steps during one episode"""
-    low_action_bound: float = 0.1
-    """the threshold below which actions are ignored"""
-    high_action_bound: float = 0.5
-    """the threshold above which actions are ignored"""
     n_instances: Optional[int] = None
     """how many problem instances to train on"""
-    action_penalty: Optional[float] = -100.0
-    """the penalty for an expensive action"""
     solver: str = "gecode"
     """the solver to use to find an initial solution and repair the subsequent"""
 
@@ -170,8 +164,10 @@ if __name__ == "__main__":
     # ==== Environments Creation ====
     problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
 
+    training_instances_paths = problem_instances_paths[:args.n_instances] if args.n_instances else problem_instances_paths
+
     envs = TSPEnvironmentMultiBinary.create_multiple(
-        problem_instances_paths[:args.n_instances] if args.n_instances else problem_instances_paths,
+        training_instances_paths,
         init_model_path=TSP_INIT_SOLVER_PATH,
         repair_model_path=TSP_REPAIR_SOLVER_PATH,
         solver_name=args.solver,
@@ -198,6 +194,7 @@ if __name__ == "__main__":
             print(f"Epoch {epoch:4}")
             epoch_start_time = time.time()
 
+        # ==== Training Metrics ====
         avg_total_reward = torchmetrics.aggregation.MeanMetric()
         avg_action_expense = torchmetrics.aggregation.MeanMetric()
         avg_ignored_actions = torchmetrics.aggregation.MeanMetric()
@@ -205,6 +202,7 @@ if __name__ == "__main__":
         avg_policy_loss = torchmetrics.aggregation.MeanMetric()
         avg_entropy_loss = torchmetrics.aggregation.MeanMetric()
         avg_total_loss = torchmetrics.aggregation.MeanMetric()
+        avg_best_objective_value = torchmetrics.aggregation.MeanMetric()
 
         for env_idx, env in enumerate(envs):
             if args.debug:
@@ -280,6 +278,7 @@ if __name__ == "__main__":
             avg_policy_loss.update(policy_loss.item())
             avg_entropy_loss.update(entropy_loss.item())
             avg_total_loss.update(total_loss.item())
+            avg_best_objective_value.update(info["best_objective_value"])
             if env_idx == args.representative_instance_idx:
                 representative_instance_best_objective_value = info["best_objective_value"]
             if args.debug and env_idx == args.representative_instance_idx:
@@ -296,6 +295,7 @@ if __name__ == "__main__":
             "avg_policy_loss": avg_policy_loss.compute(),
             "avg_entropy_loss": avg_entropy_loss.compute(),
             "avg_total_loss": avg_total_loss.compute(),
+            "avg_best_objective_value": avg_best_objective_value.compute(),
         }
         if args.debug:
             print(logs)
