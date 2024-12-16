@@ -97,13 +97,13 @@ class Agent(nn.Module):
         logits = self.head(features)
         return torch.flatten(logits)
 
-    def get_action_with_log_prob(self, graph_data: pyg.data.Data, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_action(self, graph_data: pyg.data.Data, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
         x, edge_index, edge_attr = graph_data.x, graph_data.edge_index, graph_data.edge_attr
 
         logits = self.forward(x, edge_index, edge_attr)
 
-        prob = torch.sigmoid(logits)
-        log_prob = torch.log(prob)
+        prob = F.softmax(logits, dim=-1)
+        log_prob = F.log_softmax(logits, dim=-1)
         action_idx = prob.multinomial(num_samples=k).detach()
 
         action = torch.zeros(logits.shape[0])
@@ -127,6 +127,7 @@ if __name__ == "__main__":
 
     run_name = f"TSP__{args.exp_name}__{args.seed}__{datetime.now().strftime('%Y%m%d_%H%M')}"
 
+    # ==== Tracking Initialization ====
     if args.track:
         wandb.init(
             project=args.wandb_project_name,
@@ -161,6 +162,7 @@ if __name__ == "__main__":
         print(f"Device: {device}")
 
     # ==== Seeding ====
+    random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
@@ -200,6 +202,9 @@ if __name__ == "__main__":
         avg_action_expense = torchmetrics.aggregation.MeanMetric()
         avg_ignored_actions = torchmetrics.aggregation.MeanMetric()
         representative_instance_best_objective_value = None
+        avg_policy_loss = torchmetrics.aggregation.MeanMetric()
+        avg_entropy_loss = torchmetrics.aggregation.MeanMetric()
+        avg_total_loss = torchmetrics.aggregation.MeanMetric()
 
         for env_idx, env in enumerate(envs):
             if args.debug:
@@ -218,15 +223,16 @@ if __name__ == "__main__":
             for t in range(args.max_t):
                 graph_data = env.preprocess(observation).to(device)
 
-                action, log_prob = model.get_action_with_log_prob(graph_data, k=k)
+                action, log_prob = model.get_action(graph_data, k=k)
                 action = action.cpu().numpy()
                 observation, reward, terminated, truncated, info = env.step(action)
 
                 prob = torch.exp(log_prob)
-                entropy = -(prob * log_prob + (1 - prob) * torch.log(1 - prob))
+                entropy_loss = -(log_prob * prob).sum(-1, keepdim=True)
+
                 log_probs.append(log_prob)
                 rewards.append(reward)
-                entropies.append(entropy)
+                entropies.append(entropy_loss)
 
                 # ==== Logging ====
                 if info["is_action_ignored"]:
@@ -236,7 +242,7 @@ if __name__ == "__main__":
                 if args.debug and env_idx == args.representative_instance_idx:
                     log_prob = log_prob.detach().cpu()
                     prob = torch.exp(log_prob).item()
-                    print(f"Step {t:3}, Action: {action}, Log(Prob): {log_prob.sum():.4f}, Prob: {prob:.4f}, Step objective value: {info['step_objective_value']}, Action expense: {sum(action)}")
+                    print(f"Step {t:3}, Action: {action}, Log(Prob): {log_prob.item():.4f}, Prob: {prob:.4f}, Step objective value: {info['step_objective_value']}, Action expense: {sum(action)}")
 
                 if terminated or truncated:
                     break
@@ -253,13 +259,13 @@ if __name__ == "__main__":
             returns = (returns - returns.mean()) / (returns.std() + eps)
 
             # ==== Loss Calculation ====
-            loss = []
+            policy_loss = []
             for log_prob, discounted_return in zip(log_probs, returns):
-                loss.append(-log_prob * discounted_return)
+                policy_loss.append(-log_prob * discounted_return)
 
-            loss = torch.cat(loss).sum()
-            entropy = torch.cat(entropies).sum()
-            total_loss = -loss - args.entropy_coefficient * entropy
+            policy_loss = -torch.cat(policy_loss).sum()
+            entropy_loss = -args.entropy_coefficient * torch.cat(entropies).sum()
+            total_loss = policy_loss + entropy_loss
 
             # ==== Policy Update ====
             optimizer.zero_grad()
@@ -271,19 +277,25 @@ if __name__ == "__main__":
             # ==== Logging ====
             avg_total_reward.update(sum(rewards))
             avg_ignored_actions.update(n_ignored_actions)
+            avg_policy_loss.update(policy_loss.item())
+            avg_entropy_loss.update(entropy_loss.item())
+            avg_total_loss.update(total_loss.item())
             if env_idx == args.representative_instance_idx:
                 representative_instance_best_objective_value = info["best_objective_value"]
             if args.debug and env_idx == args.representative_instance_idx:
-                print(f"Loss: {loss.item():.4f}")
-                print(f"Entropy: {entropy.item():.4f}")
+                print(f"Policy Loss: {policy_loss.item():.4f}")
+                print(f"Entropy Loss: {entropy_loss.item():.4f}")
                 print(f"Total Loss: {total_loss.item():.4f}")
 
         # ==== Logging ====
         logs = {
             "avg_total_reward": avg_total_reward.compute(),
             "best_objective_value_for_representative_instance": representative_instance_best_objective_value,
-            "avg_ignored_actions": avg_ignored_actions.compute(),
-            "avg_action_expense": avg_action_expense.compute(),
+            # "avg_ignored_actions": avg_ignored_actions.compute(),
+            # "avg_action_expense": avg_action_expense.compute(),
+            "avg_policy_loss": avg_policy_loss.compute(),
+            "avg_entropy_loss": avg_entropy_loss.compute(),
+            "avg_total_loss": avg_total_loss.compute(),
         }
         if args.debug:
             print(logs)

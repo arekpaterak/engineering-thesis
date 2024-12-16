@@ -7,7 +7,7 @@ Train with REINFORCE on TSP:
 
 - with the MultiBinary action (but :
 ```
-python -m experiments.tsp.train.reinforce_multibinary --n-epochs 5 --max-t 50 --track --n-instances 1 --learning-rate 1e-5
+python -m experiments.tsp.train.reinforce_multibinary --n-epochs 50 --max-t 50 --track --n-instances 1 --learning-rate 1e-4
 ```
 
 - with the Discrete action space:

@@ -61,7 +61,7 @@ if __name__ == '__main__':
 
     problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
 
-    # ==== Tracking Initialisation ====
+    # ==== Tracking Initialization ====
     if args.track:
         wandb.init(
             project=args.wandb_project_name,
