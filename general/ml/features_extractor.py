@@ -96,7 +96,7 @@ if __name__ == "__main__":
     BASE_PATH = "D:\\Coding\\University\\S7\\engineering-thesis"
 
     TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", "generated", "train")
-    problem_path = os.path.join(TSP_DATA_DIR, "20_1000_0.json")
+    problem_path = os.path.join(TSP_DATA_DIR, "50_1000_0.json")
 
     TSP_SOLVERS_DIR = os.path.join(BASE_PATH, "problems", "tsp", "minizinc")
     TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init_circuit.mzn")

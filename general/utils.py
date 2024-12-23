@@ -12,6 +12,9 @@ from gymnasium.spaces import MultiBinary
 def draw_graph(
     graph: pyg.data.Data,
     with_labels: bool = True,
+    node_color: str = "skyblue",
+    node_border_color: str = "black",
+    border_width: float = 1.5
 ) -> matplotlib.pyplot:
     G = pyg.utils.to_networkx(graph, node_attrs=['x', 'pos'], to_undirected=True)
 
@@ -20,7 +23,18 @@ def draw_graph(
     fixed_pos = {i: (graph.pos[i][0].item(), graph.pos[i][1].item()) for i in range(graph.pos.size(0))}
 
     plt.figure(figsize=(10, 10))
-    nx.draw(G, pos=fixed_pos, with_labels=with_labels, node_color="skyblue", node_size=500, edge_color="black", font_size=10)
+    nx.draw(
+        G,
+        pos=fixed_pos,
+        with_labels=with_labels,
+        node_color=node_color,
+        edgecolors=node_border_color,
+        linewidths=border_width,
+        node_size=500,
+        edge_color="black",
+        font_size=10,
+        width=1.2
+    )
     return plt
 
 

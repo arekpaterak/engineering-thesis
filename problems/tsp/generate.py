@@ -15,7 +15,7 @@ class Args:
     n: int
     num_nodes: int
     max_coordinate: int = 1000
-    dir: str = os.path.join(BASE_DIR, "data", "generated")
+    dir: str = "generated"
     starting_n: int = 0
     use_ints: bool = True
     seed: int = 13
@@ -23,6 +23,8 @@ class Args:
 
 if __name__ == '__main__':
     args = tyro.cli(Args)
+
+    dir = os.path.join(BASE_DIR, "data", args.dir)
 
     np.random.seed(args.seed)
 
@@ -33,4 +35,4 @@ if __name__ == '__main__':
             num_nodes=args.num_nodes,
             max_coordinate=args.max_coordinate,
         )
-        generated_instance.save(os.path.join(args.dir, filename), use_ints=args.use_ints)
+        generated_instance.save(os.path.join(dir, filename), use_ints=args.use_ints)

@@ -6,8 +6,14 @@
 Train with REINFORCE on TSP:
 
 - with the MultiBinary action space (but sampling k nodes to destroy):
+
+n=20
 ```
-python -m experiments.tsp.train.reinforce_multibinary --n-epochs 100 --max-t 100 --track --instances 0 --learning-rate 1e-5 --entropy-coefficient 0.1 --proportion 0.1 --max-grad-norm 2
+python -m experiments.tsp.train.reinforce_multibinary --n-epochs 10 --max-t 100 --track --instances 0 9 --learning-rate 1e-5 --entropy-coefficient 0.1 --proportion 0.1 --max-grad-norm 2
+```
+n=50
+```
+python -m experiments.tsp.train.reinforce_multibinary --n-epochs 10 --max-t 100 --track --instances 0 --problem-sizes 50 --learning-rate 1e-5 --entropy-coefficient 0.1 --proportion 0.1 --max-grad-norm 2
 ```
 
 ### CVRP

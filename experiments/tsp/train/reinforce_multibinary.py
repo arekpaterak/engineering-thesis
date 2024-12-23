@@ -1,7 +1,7 @@
 import os
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import random
 from datetime import datetime
 from typing import Callable, Tuple, Optional
@@ -57,6 +57,8 @@ class Args:
     # Environment specific arguments
     max_t: Optional[int] = None
     """the maximum number of steps during one episode"""
+    problem_sizes: list[int] = field(default_factory=lambda: [20])
+    """"""
     instances: int | Tuple[int, int] = 0
     """the instance index or a range"""
     solver: str = "gecode"
@@ -136,8 +138,6 @@ if __name__ == "__main__":
     TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init_circuit.mzn")
     TSP_REPAIR_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair_circuit.mzn")
 
-    run_name = f"TSP__{args.exp_name}__{args.seed}__{datetime.now().strftime('%Y%m%d_%H%M')}"
-
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     if args.debug:
         print(f"Device: {device}")
@@ -151,11 +151,22 @@ if __name__ == "__main__":
     # ==== Environments Creation ====
     problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
 
+    # Filter instances
+    training_instances_paths = []
     match args.instances:
         case int():
-            training_instances_paths = [problem_instances_paths[args.instances]]
+            for path in problem_instances_paths:
+                size, _, idx = os.path.basename(path).rstrip(".json").strip().split("_")
+                size, idx = int(size), int(idx)
+                if size in args.problem_sizes and idx == args.instances:
+                    training_instances_paths.append(path)
         case _:
-            training_instances_paths = problem_instances_paths[args.instances[0]:args.instances[1]+1]
+            index_range = range(args.instances)
+            for path in problem_instances_paths:
+                size, _, idx = os.path.basename(path).rstrip(".json").strip().split("_")
+                size, idx = int(size), int(idx)
+                if size in args.problem_sizes and idx in index_range:
+                    training_instances_paths.append(path)
 
     if args.debug:
         print("Training instances:", training_instances_paths)
@@ -185,6 +196,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
     # ==== Tracking Initialization ====
+    run_name = f"TSP__{args.problem_sizes}__n_envs={len(envs)}__{args.exp_name}__{args.seed}__{datetime.now().strftime('%Y%m%d_%H%M')}"
     if args.track:
         wandb.init(
             project=args.wandb_project_name,
@@ -193,6 +205,7 @@ if __name__ == "__main__":
             save_code=True,
             config={
                 "env": {
+                    "n_instances": len(envs),
                     "init_solver": TSP_INIT_SOLVER_PATH,
                     "repair_solver": TSP_REPAIR_SOLVER_PATH,
                     "max_t": args.max_t,
@@ -286,8 +299,8 @@ if __name__ == "__main__":
             for log_prob, discounted_return in zip(log_probs, returns):
                 policy_loss.append(-log_prob * discounted_return)
 
+            policy_loss = torch.cat(policy_loss).sum()
             # As the regularization, the entropy should be maximized (which equals minimizing its negative)
-            policy_loss = -torch.cat(policy_loss).sum()
             entropy = args.entropy_coefficient * torch.cat(entropies).sum()
             total_loss = policy_loss - entropy
 
@@ -332,7 +345,7 @@ if __name__ == "__main__":
             model_path = os.path.join(wandb.run.dir, "model.pt")
             torch.save(model.state_dict(), model_path)
 
-            artifact = wandb.Artifact(f"model-{args.proportion}", type="model")
+            artifact = wandb.Artifact(f"model-{args.proportion}-{args.problem_sizes}", type="model")
             artifact.add_file(model_path)
             wandb.log_artifact(artifact)
 
