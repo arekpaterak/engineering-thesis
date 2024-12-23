@@ -14,6 +14,8 @@ class GraphFeaturesExtractor(nn.Module):
     def __init__(
         self,
         in_channels: int,
+        num_layers: int = 3,
+        hidden_channels: int = 64,
         out_channels: int = 512,
         edge_dim: int = None,
         num_heads: int = 1,
@@ -23,16 +25,15 @@ class GraphFeaturesExtractor(nn.Module):
         super().__init__()
 
         conv = GATConv if not v2 else GATv2Conv
-        self.convs = nn.ModuleList(
-            [
-                conv(in_channels, 32, heads=num_heads, concat=True, edge_dim=edge_dim),
-                conv(
-                    32 * num_heads, 64, heads=num_heads, concat=True, edge_dim=edge_dim
-                ),
-                conv(64 * num_heads, 64, heads=1, concat=False, edge_dim=edge_dim),
-            ]
-        )
-        self.fc = Linear(64, out_channels)
+
+        self.convs = nn.ModuleList([
+            conv(in_channels, hidden_channels, heads=num_heads, concat=True, edge_dim=edge_dim)
+        ])
+        for _ in range(num_layers - 2):
+            self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=num_heads, concat=True, edge_dim=edge_dim))
+        self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=1, concat=False, edge_dim=edge_dim))
+
+        self.fc = Linear(hidden_channels, out_channels)
         self.activation = activation
 
         self.features_dim = out_channels
@@ -90,9 +91,22 @@ class SequentialGraphFeaturesExtractor(nn.Module):
 
 
 if __name__ == "__main__":
-    observation = {'problem': {'node_positions': [{'x': 74, 'y': 528}, {'x': 658, 'y': 280}, {'x': 314, 'y': 534}, {'x': 160, 'y': 915}, {'x': 756, 'y': 153}, {'x': 841, 'y': 843}, {'x': 748, 'y': 954}, {'x': 995, 'y': 922}, {'x': 75, 'y': 1}, {'x': 139, 'y': 470}, {'x': 338, 'y': 176}, {'x': 973, 'y': 586}, {'x': 296, 'y': 844}, {'x': 820, 'y': 770}, {'x': 438, 'y': 229}, {'x': 742, 'y': 866}, {'x': 244, 'y': 638}, {'x': 962, 'y': 942}, {'x': 149, 'y': 403}, {'x': 412, 'y': 11}]}, 'solution': {'route': [1, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]}}
+    import os
 
-    graph_data = TSPEnvironmentMultiBinary.preprocess(observation)
+    BASE_PATH = "D:\\Coding\\University\\S7\\engineering-thesis"
 
-    net = GraphFeaturesExtractor(in_channels=2, num_heads=8, edge_dim=1)
+    TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", "generated", "train")
+    problem_path = os.path.join(TSP_DATA_DIR, "20_1000_0.json")
+
+    TSP_SOLVERS_DIR = os.path.join(BASE_PATH, "problems", "tsp", "minizinc")
+    TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init_circuit.mzn")
+    TSP_REPAIR_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair_circuit.mzn")
+
+    env = TSPEnvironmentMultiBinary(problem_path, TSP_INIT_SOLVER_PATH, TSP_REPAIR_SOLVER_PATH)
+
+    obs, _ = env.reset()
+
+    graph_data = TSPEnvironmentMultiBinary.preprocess(obs)
+
+    net = GraphFeaturesExtractor(in_channels=2, num_heads=8, edge_dim=1, num_layers=5)
     print(pyg.nn.summary(net, graph_data.x, graph_data.edge_index, graph_data.edge_attr))

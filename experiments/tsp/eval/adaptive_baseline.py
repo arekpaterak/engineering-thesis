@@ -38,6 +38,7 @@ class Args:
     adaptation_timelimit_in_s: int = 10
     """the time after which the initial proportion is increased"""
 
+
 if __name__ == '__main__':
     args = tyro.cli(Args)
 
@@ -73,7 +74,6 @@ if __name__ == '__main__':
             repair_model_path=TSP_REPAIR_SOLVER_PATH,
             solver_name=args.solver,
             max_episode_length=args.max_t,
-            action_bounds=None,
         )
 
         proportion = args.initial_proportion
@@ -151,7 +151,7 @@ if __name__ == '__main__':
                 df.to_csv(TSP_BEST_RESULTS_PATH, index=False)
 
                 if args.debug:
-                    print(f"Solution: {env.lns.best_solution.route}")
+                    print(f"Solution: {env.lns.best_solution.next}")
                     print(f"Objective value: {info['best_objective_value']}")
                     print(f"Measured time: {episode_time:.3f} s")
                     print(f"Average time per one step: {(episode_time / step):.3f} s")

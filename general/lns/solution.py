@@ -35,7 +35,7 @@ class CPSolution(ABC, Generic[P]):
         """returns True, if we minimize objective, otherwise False"""
 
     @abstractmethod
-    def relax(self, action) -> P:
+    def destroy(self, action) -> P:
         pass
 
     def is_better_than(self, other: Self) -> bool:

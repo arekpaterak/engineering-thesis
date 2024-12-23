@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, InitVar
 from typing import Self
 
+from PyQt5.QtCore import fixed
 from minizinc import Instance
 
 from general.lns.solution import CPPartialSolution, CPSolution
@@ -12,18 +13,18 @@ from general.lns.solver import CPSolver
 @dataclass
 class TSPPartialSolution(CPPartialSolution):
     solution: TSPSolution
-    fixed_route: list[int]
+    fixed_next: list[int]
 
     def to_output(self) -> str:
-        return f"fixed_route = {self.fixed_route};"
+        return f"fixed_next = {self.fixed_next};"
 
     def fix_instance(self, instance: Instance):
-        instance["fixed_route"] = self.fixed_route
+        instance["fixed_next"] = self.fixed_next
 
 
 @dataclass
 class TSPSolution(CPSolution):
-    route: list[int]
+    next: list[int]
     total_distance: int
 
     # attribute required to be used by the MiniZinc library (stores objective in optimization problems)
@@ -33,7 +34,7 @@ class TSPSolution(CPSolution):
 
     def to_output(self) -> str:
         return "\n".join([
-            f"route = {self.route};",
+            f"next = {self.next};",
             f"total_distance = {self.total_distance};"
         ])
 
@@ -45,13 +46,14 @@ class TSPSolution(CPSolution):
     def should_minimize(self) -> bool:
         return True
 
-    def relax(self, action: list[int]) -> TSPPartialSolution:
-        fixed_route = self.route.copy()
-        indices_to_relax = action
-        for i, flag in enumerate(indices_to_relax):
-            if flag == 1:
-                fixed_route[i] = 0
-        return TSPPartialSolution(self, fixed_route)
+    def destroy(self, action: list[int]) -> TSPPartialSolution:
+        fixed_next = self.next.copy()
+
+        # remove all edges of the selected nodes; 1 subtracted from indices because of the MiniZinc representation
+        for node, next_node in enumerate(fixed_next, start=1):
+            if action[node-1] or action[next_node-1]:
+                fixed_next[node-1] = 0
+        return TSPPartialSolution(self, fixed_next)
 
     def score_against(self, other: Self) -> int:
         return other.objective_value - self.objective_value

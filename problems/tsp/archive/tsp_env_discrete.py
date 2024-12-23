@@ -110,7 +110,7 @@ class TSPEnvironmentDiscrete(LNSEnvironment):
                 "node_positions": [{"x": position.x, "y": position.y} for position in self.problem.node_positions],
             },
             "solution": {
-                "route": solution.route,
+                "route": solution.next,
             },
         }
         return result

@@ -11,7 +11,7 @@ import torch
 import tyro
 import wandb
 
-from experiments.tsp.train.reinforce_multibinary import Agent
+from experiments.tsp.train.reinforce_multibinary import Policy
 from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
 
 
@@ -35,6 +35,10 @@ class Args:
     """if toggled, extra logs will be printed to the console"""
     log_every_n_step: int = 10
     """the logging interval"""
+    model_name: Optional[str] = None
+    """the name of the model"""
+    model_tag: str = "latest"
+    """the tag of the model"""
 
     # Environment specific arguments
     max_t: Optional[int] = None
@@ -68,8 +72,13 @@ if __name__ == '__main__':
         problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
 
     # ==== Loading the model ====
+    if args.model_name:
+        model_name = args.model_name
+    else:
+        model_name = f"model-{args.proportion}"
+
     wandb_api = wandb.Api()
-    artifact = wandb_api.artifact(f"{args.wandb_project_name}/model-{args.proportion}:latest")
+    artifact = wandb_api.artifact(f"{args.wandb_project_name}/{model_name}:{args.model_tag}")
     artifact_dir = artifact.download()
 
     model_path = os.path.join(artifact_dir, "model.pt")
@@ -79,7 +88,7 @@ if __name__ == '__main__':
         num_heads=8,
         edge_dim=1,
     )
-    model = Agent(
+    model = Policy(
         graph_features_extractor_kwargs=graph_features_extractor_kwargs,
     )
     model.load_state_dict(torch.load(model_path, weights_only=True))
@@ -107,7 +116,6 @@ if __name__ == '__main__':
             repair_model_path=TSP_REPAIR_SOLVER_PATH,
             solver_name=args.solver,
             max_episode_length=args.max_t,
-            action_bounds=None,
         )
 
         proportion = args.proportion
@@ -178,7 +186,7 @@ if __name__ == '__main__':
                 df.to_csv(TSP_BEST_RESULTS_PATH, index=False)
 
                 if args.debug:
-                    print(f"Solution: {env.lns.best_solution.route}")
+                    print(f"Solution: {env.lns.best_solution.next}")
                     print(f"Objective value: {info['best_objective_value']}")
                     print(f"Measured time: {episode_time:.3f} s")
                     print(f"Average time per one step: {(episode_time / step):.3f} s")

@@ -17,6 +17,7 @@ class Position:
     def distanceTo(self, other: Self) -> float:
         return np.sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2)
 
+
 @dataclass
 class TravelingSalesmanProblem(Problem):
     num_nodes: int

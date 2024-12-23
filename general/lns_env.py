@@ -20,12 +20,14 @@ class LNSEnvironment(ABC, gym.Env):
         repair_model_path: str,
         solver_name: str = "gecode",
         max_episode_length: Optional[int] = None,
+        processes: int = 1
     ) -> None:
         solver = solver_cls(
             problem_path=problem_instance_path,
             init_model_path=init_model_path,
             repair_model_path=repair_model_path,
             solver_name=solver_name,
+            processes=processes
         )
         self.lns = LNS(solver=solver)
         self.problem = problem_cls.load_from_file(problem_instance_path)

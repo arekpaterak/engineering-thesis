@@ -26,7 +26,7 @@ from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
 class Args:
     instance_name: Optional[str] = None
     """the instance on which the method will be run"""
-    instances_dir_name: str = "train"
+    instances_dir_name: str = "generated/train"
     """the name of instances directory"""
     seed: int = 1
     """seed of the experiment"""
@@ -40,6 +40,8 @@ class Args:
     """the maximum number of steps during one episode"""
     solver: str = "gecode"
     """the solver to use to find an initial solution and repair the subsequent"""
+    processes: int = 1
+    """the number of processes to use in MiniZinc"""
 
     # Algorithm specific arguments
     proportion: float = 0.2
@@ -54,8 +56,8 @@ if __name__ == '__main__':
     TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", args.instances_dir_name)
 
     TSP_SOLVERS_DIR = os.path.join(BASE_PATH, "problems", "tsp", "minizinc")
-    TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init.mzn")
-    TSP_REPAIR_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair.mzn")
+    TSP_INIT_MODEL_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init_circuit.mzn")
+    TSP_REPAIR_MODEL_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair_circuit.mzn")
 
     if args.instance_name is None:
         problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
@@ -77,11 +79,11 @@ if __name__ == '__main__':
         # ==== Environment Creation ====
         env = TSPEnvironmentMultiBinary(
             problem_instance_path=instance_path,
-            init_model_path=TSP_INIT_SOLVER_PATH,
-            repair_model_path=TSP_REPAIR_SOLVER_PATH,
+            init_model_path=TSP_INIT_MODEL_PATH,
+            repair_model_path=TSP_REPAIR_MODEL_PATH,
             solver_name=args.solver,
             max_episode_length=args.max_t,
-            action_bounds=None,
+            processes=args.processes,
         )
 
         proportion = args.proportion
@@ -152,7 +154,7 @@ if __name__ == '__main__':
                 df.to_csv(TSP_BEST_RESULTS_PATH, index=False)
 
                 if args.debug:
-                    print(f"Solution: {env.lns.best_solution.route}")
+                    print(f"Solution: {env.lns.best_solution.next}")
                     print(f"Objective value: {info['best_objective_value']}")
                     print(f"Measured time: {episode_time:.3f} s")
                     print(f"Average time per one step: {(episode_time / step):.3f} s")

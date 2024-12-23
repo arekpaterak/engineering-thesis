@@ -32,16 +32,21 @@ class LNS:
             score
             terminated
             truncated
+            info
         """
-        partial_solution = self.best_solution.relax(action)
-        new_solution = self.solver.repair(partial_solution)
+        partial_solution = self.best_solution.destroy(action)
+        step_solution = self.solver.repair(partial_solution)
 
-        self.step_objective_value = new_solution.objective_value
+        self.step_objective_value = step_solution.objective_value
 
-        score = new_solution.score_against(self.best_solution)
-        if new_solution.is_better_than(self.best_solution):
-            self.best_solution = new_solution
+        score = step_solution.score_against(self.best_solution)
+        if step_solution.is_better_than(self.best_solution):
+            self.best_solution = step_solution
+
+        info = {
+            "partial_solution": partial_solution,
+        }
 
         # TODO: Think about terminated and truncated.
         # Terminated could be added if the optimal solution objective is available.
-        return self.best_solution, score, False, False
+        return self.best_solution, score, False, False, info

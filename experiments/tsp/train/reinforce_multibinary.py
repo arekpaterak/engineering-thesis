@@ -25,6 +25,12 @@ from general.ml.features_extractor import GraphFeaturesExtractor
 from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
 
 
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+
 @dataclass
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -51,10 +57,19 @@ class Args:
     # Environment specific arguments
     max_t: Optional[int] = None
     """the maximum number of steps during one episode"""
-    n_instances: Optional[int] = None
-    """how many problem instances to train on"""
+    instances: int | Tuple[int, int] = 0
+    """the instance index or a range"""
     solver: str = "gecode"
     """the solver to use to find an initial solution and repair the subsequent"""
+    processes: int = 1
+    """the number of processes to use in MiniZinc"""
+
+    # Neural Network specific arguments
+    num_layers: int = 5
+    num_heads: int = 8
+    hidden_channels: int = 64
+    out_channels: int = 512
+    gat_v2: bool = False
 
     # Algorithm specific arguments
     learning_rate: float = 1e-3
@@ -71,7 +86,7 @@ class Args:
     """the maximum norm for gradient clipping"""
 
 
-class Agent(nn.Module):
+class Policy(nn.Module):
     def __init__(
         self,
         graph_features_extractor_kwargs: dict,
@@ -115,40 +130,13 @@ if __name__ == "__main__":
 
     BASE_PATH = "D:\\Coding\\University\\S7\\engineering-thesis"
 
-    TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", "train")
+    TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", "generated", "train")
 
     TSP_SOLVERS_DIR = os.path.join(BASE_PATH, "problems", "tsp", "minizinc")
-    TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init.mzn")
-    TSP_REPAIR_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair.mzn")
+    TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init_circuit.mzn")
+    TSP_REPAIR_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair_circuit.mzn")
 
     run_name = f"TSP__{args.exp_name}__{args.seed}__{datetime.now().strftime('%Y%m%d_%H%M')}"
-
-    # ==== Tracking Initialization ====
-    if args.track:
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            name=run_name,
-            save_code=True,
-            config={
-                "env": {
-                    "init_solver": TSP_INIT_SOLVER_PATH,
-                    "repair_solver": TSP_REPAIR_SOLVER_PATH,
-                    "max_t": args.max_t,
-                    "n_envs": args.n_instances,
-                    "solver": args.solver,
-                },
-                "algorithm": {
-                    "learning_rate": args.learning_rate,
-                    "gamma": args.gamma,
-                    "n_epochs": args.n_epochs,
-                    "entropy_coefficient": args.entropy_coefficient,
-                    "proportion": args.proportion,
-                    "max_grad_norm": args.max_grad_norm,
-                }
-            },
-            job_type="train"
-        )
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     if args.debug:
@@ -163,7 +151,14 @@ if __name__ == "__main__":
     # ==== Environments Creation ====
     problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
 
-    training_instances_paths = problem_instances_paths[:args.n_instances] if args.n_instances else problem_instances_paths
+    match args.instances:
+        case int():
+            training_instances_paths = [problem_instances_paths[args.instances]]
+        case _:
+            training_instances_paths = problem_instances_paths[args.instances[0]:args.instances[1]+1]
+
+    if args.debug:
+        print("Training instances:", training_instances_paths)
 
     envs = TSPEnvironmentMultiBinary.create_multiple(
         training_instances_paths,
@@ -171,18 +166,57 @@ if __name__ == "__main__":
         repair_model_path=TSP_REPAIR_SOLVER_PATH,
         solver_name=args.solver,
         max_episode_length=args.max_t,
+        processes=args.processes
     )
 
     # ==== Model Creation ====
     graph_features_extractor_kwargs = dict(
         in_channels=2,
-        num_heads=8,
+        num_heads=args.num_heads,
         edge_dim=1,
+        num_layers=args.num_layers,
+        v2=args.gat_v2,
+        hidden_channels=args.hidden_channels,
+        out_channels=args.out_channels,
     )
-    model = Agent(
+    model = Policy(
         graph_features_extractor_kwargs=graph_features_extractor_kwargs,
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+
+    # ==== Tracking Initialization ====
+    if args.track:
+        wandb.init(
+            project=args.wandb_project_name,
+            entity=args.wandb_entity,
+            name=run_name,
+            save_code=True,
+            config={
+                "env": {
+                    "init_solver": TSP_INIT_SOLVER_PATH,
+                    "repair_solver": TSP_REPAIR_SOLVER_PATH,
+                    "max_t": args.max_t,
+                    "instances": args.instances,
+                    "solver": args.solver,
+                    "training_instances_paths": training_instances_paths,
+                },
+                "neural_network": {
+                    "num_layers": args.num_layers,
+                    "num_heads": args.num_heads,
+                    "hidden_channels": args.hidden_channels,
+                    "out_channels": args.out_channels,
+                },
+                "algorithm": {
+                    "learning_rate": args.learning_rate,
+                    "gamma": args.gamma,
+                    "n_epochs": args.n_epochs,
+                    "entropy_coefficient": args.entropy_coefficient,
+                    "proportion": args.proportion,
+                    "max_grad_norm": args.max_grad_norm,
+                }
+            },
+            job_type="train"
+        )
 
     # ==== Training ====
     model.train()
@@ -193,11 +227,9 @@ if __name__ == "__main__":
 
         # ==== Training Metrics ====
         avg_total_reward = torchmetrics.aggregation.MeanMetric()
-        avg_action_expense = torchmetrics.aggregation.MeanMetric()
-        avg_ignored_actions = torchmetrics.aggregation.MeanMetric()
         representative_instance_best_objective_value = None
         avg_policy_loss = torchmetrics.aggregation.MeanMetric()
-        avg_entropy_loss = torchmetrics.aggregation.MeanMetric()
+        avg_entropy = torchmetrics.aggregation.MeanMetric()
         avg_total_loss = torchmetrics.aggregation.MeanMetric()
         avg_best_objective_value = torchmetrics.aggregation.MeanMetric()
 
@@ -230,14 +262,10 @@ if __name__ == "__main__":
                 entropies.append(entropy_loss)
 
                 # ==== Logging ====
-                if info["is_action_ignored"]:
-                    n_ignored_actions += 1
-                avg_action_expense.update(sum(action))
-
                 if args.debug and env_idx == args.representative_instance_idx:
                     log_prob = log_prob.detach().cpu()
                     prob = torch.exp(log_prob).item()
-                    print(f"Step {t:3}, Action: {action}, Log(Prob): {log_prob.item():.4f}, Prob: {prob:.4f}, Step objective value: {info['step_objective_value']}, Action expense: {sum(action)}")
+                    print(f"Step {t:3}, Action: {action}, Log(Prob): {log_prob.item():.4f}, Prob: {prob:.4f}, Reward: {reward}, Step objective value: {info['step_objective_value']}, k: {int(sum(action))}")
 
                 if terminated or truncated:
                     break
@@ -258,9 +286,10 @@ if __name__ == "__main__":
             for log_prob, discounted_return in zip(log_probs, returns):
                 policy_loss.append(-log_prob * discounted_return)
 
+            # As the regularization, the entropy should be maximized (which equals minimizing its negative)
             policy_loss = -torch.cat(policy_loss).sum()
-            entropy_loss = -args.entropy_coefficient * torch.cat(entropies).sum()
-            total_loss = policy_loss + entropy_loss
+            entropy = args.entropy_coefficient * torch.cat(entropies).sum()
+            total_loss = policy_loss - entropy
 
             # ==== Policy Update ====
             optimizer.zero_grad()
@@ -271,16 +300,15 @@ if __name__ == "__main__":
 
             # ==== Logging ====
             avg_total_reward.update(sum(rewards))
-            avg_ignored_actions.update(n_ignored_actions)
             avg_policy_loss.update(policy_loss.item())
-            avg_entropy_loss.update(entropy_loss.item())
+            avg_entropy.update(entropy.item())
             avg_total_loss.update(total_loss.item())
             avg_best_objective_value.update(info["best_objective_value"])
             if env_idx == args.representative_instance_idx:
                 representative_instance_best_objective_value = info["best_objective_value"]
-            if args.debug and env_idx == args.representative_instance_idx:
+            if args.debug:
                 print(f"Policy Loss: {policy_loss.item():.4f}")
-                print(f"Entropy Loss: {entropy_loss.item():.4f}")
+                print(f"Entropy: {entropy.item():.4f}")
                 print(f"Total Loss: {total_loss.item():.4f}")
 
         # ==== Logging ====
@@ -288,10 +316,8 @@ if __name__ == "__main__":
             "avg_total_reward": avg_total_reward.compute(),
             "avg_best_objective_value": avg_best_objective_value.compute(),
             "best_objective_value_for_representative_instance": representative_instance_best_objective_value,
-            # "avg_ignored_actions": avg_ignored_actions.compute(),
-            # "avg_action_expense": avg_action_expense.compute(),
             "avg_policy_loss": avg_policy_loss.compute(),
-            "avg_entropy_loss": avg_entropy_loss.compute(),
+            "avg_entropy": avg_entropy.compute(),
             "avg_total_loss": avg_total_loss.compute(),
         }
         if args.debug:
