@@ -55,9 +55,6 @@ class TSPSolution(CPSolution):
                 fixed_next[node-1] = 0
         return TSPPartialSolution(self, fixed_next)
 
-    def score_against(self, other: Self) -> int:
-        return other.objective_value - self.objective_value
-
 
 class TSPSolver(CPSolver[TSPSolution, TSPPartialSolution]):
     def __init__(

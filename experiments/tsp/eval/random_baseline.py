@@ -1,7 +1,7 @@
 import os
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import random
 from typing import Callable, Tuple, Optional
 
@@ -63,6 +63,8 @@ if __name__ == '__main__':
         problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
     else:
         problem_instances_paths = [os.path.join(TSP_DATA_DIR, f"{args.instance_name}.json")]
+
+    print(problem_instances_paths)
 
     # ==== Loop over problem instances ====
     for instance_idx, instance_path in enumerate(problem_instances_paths):

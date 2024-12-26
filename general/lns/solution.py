@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TypeVar, Generic, Self, List
 
+import numpy as np
 from minizinc import Instance
 
 
@@ -44,10 +45,9 @@ class CPSolution(ABC, Generic[P]):
         else:
             return self.objective_value > other.objective_value
 
-    @abstractmethod
     def score_against(self, other: Self):
-        pass
-        # if self.should_minimize:
-        #     return other.objective_value - self.objective_value
-        # else:
-        #     return self.objective_value - other.objective_value
+        eps = np.finfo(float).eps
+        if self.should_minimize:
+            return (other.objective_value - self.objective_value) / (other.objective_value + eps)
+        else:
+            return (self.objective_value - other.objective_value) / (other.objective_value + eps)

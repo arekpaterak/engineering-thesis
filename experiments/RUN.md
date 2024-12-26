@@ -9,11 +9,17 @@ Train with REINFORCE on TSP:
 
 n=20
 ```
-python -m experiments.tsp.train.reinforce_multibinary --n-epochs 10 --max-t 100 --track --instances 0 9 --learning-rate 1e-5 --entropy-coefficient 0.1 --proportion 0.1 --max-grad-norm 2
+python -m experiments.tsp.train.reinforce_multibinary --n-epochs 25 --max-t 20 --track --instances 0 9 --learning-rate 1e-5 --entropy-coefficient 0.0 --proportion 0.2 --max-grad-norm 2 --num-layers 12 --gat-v2 --num-heads 8
 ```
+
 n=50
 ```
-python -m experiments.tsp.train.reinforce_multibinary --n-epochs 10 --max-t 100 --track --instances 0 --problem-sizes 50 --learning-rate 1e-5 --entropy-coefficient 0.1 --proportion 0.1 --max-grad-norm 2
+python -m experiments.tsp.train.reinforce_multibinary --n-epochs 10 --max-t 50 --track --instances 0 --problem-sizes 50 --learning-rate 1e-5 --entropy-coefficient 5.0 --proportion 0.1 --max-grad-norm 2
+```
+
+n=100
+```
+python -m experiments.tsp.train.reinforce_multibinary --n-epochs 10 --max-t 50 --track --instances 0 --problem-sizes 100 --learning-rate 1e-5 --entropy-coefficient 1.0 --proportion 0.2 --max-grad-norm 2
 ```
 
 ### CVRP
@@ -29,7 +35,7 @@ python -m experiments.tsp.eval.trained_model --max-t 50 --proportion 0.2 --insta
 
 Evaluate the random baseline on TSP:
 ```
-python -m experiments.tsp.eval.random_baseline --max-t 50 --proportion 0.2 --instance-name 20_1000_0 --instances-dir-name train --seed 1 --processes 1 --solver cp-sat
+python -m experiments.tsp.eval.random_baseline --max-t 50 --proportion 0.05 --instance-name 100_1000_0 --instances-dir-name generated/train --seed 1 --processes 1 --solver gecode
 ```
 
 Evaluate the adaptive baseline on TSP:
