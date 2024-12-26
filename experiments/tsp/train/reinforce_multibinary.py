@@ -21,6 +21,7 @@ import torchmetrics
 
 import tyro
 import wandb
+from torch.nn import MSELoss
 
 from general.ml.features_extractor import GraphFeaturesExtractor
 from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
@@ -67,6 +68,7 @@ class Args:
     """the solver to use to find an initial solution and repair the subsequent"""
     processes: int = 1
     """the number of processes to use in MiniZinc"""
+    fully_connected: bool = False
 
     # Neural Network specific arguments
     num_layers: int = 5
@@ -88,7 +90,6 @@ class Args:
     """the proportion of the nodes in the problem to destroy in one step"""
     max_grad_norm: Optional[float] = None
     """the maximum norm for gradient clipping"""
-    use_value_baseline: bool = False
 
 
 class Policy(nn.Module):
@@ -110,13 +111,11 @@ class Policy(nn.Module):
         # ==== Value Estimation Head ====
         self.value_estimator = nn.Linear(features_dim, 1)
 
-    def forward(self, x, edge_index, edge_attr=None, batch=None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x, edge_index, edge_attr=None, batch=None) -> torch.Tensor:
         features = self.features_extractor(x, edge_index, edge_attr)
         logits = self.head(features)
 
-        value = F.tanh(self.value_estimator(pyg.nn.global_mean_pool(features, batch=batch)))
-
-        return torch.flatten(logits), torch.flatten(value)
+        return torch.flatten(logits)
 
     def get_action(self, graph_data: pyg.data.Data, k: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x, edge_index, edge_attr = graph_data.x, graph_data.edge_index, graph_data.edge_attr
@@ -135,25 +134,6 @@ class Policy(nn.Module):
         log_prob = log_prob.gather(0, action_idx)
 
         return action, log_prob.sum(-1, keepdim=True), entropy
-
-    def get_action_and_value(self, graph_data: pyg.data.Data, k: int) -> Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        x, edge_index, edge_attr = graph_data.x, graph_data.edge_index, graph_data.edge_attr
-
-        logits, value = self.forward(x, edge_index, edge_attr)
-
-        prob = F.softmax(logits, dim=-1)
-        log_prob = F.log_softmax(logits, dim=-1)
-        action_idx = prob.multinomial(num_samples=k).detach()
-
-        entropy = -(log_prob * prob).sum(-1, keepdim=True)
-
-        action = torch.zeros(logits.shape[0])
-        action[action_idx] = 1
-
-        log_prob = log_prob.gather(0, action_idx)
-
-        return action, log_prob.sum(-1, keepdim=True), entropy, value
 
 
 if __name__ == "__main__":
@@ -206,7 +186,8 @@ if __name__ == "__main__":
         repair_model_path=TSP_REPAIR_SOLVER_PATH,
         solver_name=args.solver,
         max_episode_length=args.max_t,
-        processes=args.processes
+        processes=args.processes,
+        fully_connected=args.fully_connected
     )
 
     # ==== Model Creation ====
@@ -256,7 +237,6 @@ if __name__ == "__main__":
                     "entropy_coefficient": args.entropy_coefficient,
                     "proportion": args.proportion,
                     "max_grad_norm": args.max_grad_norm,
-                    "use_value_baseline": args.use_value_baseline,
                 }
             },
             job_type="train"
@@ -274,7 +254,6 @@ if __name__ == "__main__":
         representative_instance_best_objective_value = None
         avg_policy_loss = torchmetrics.aggregation.MeanMetric()
         avg_entropy = torchmetrics.aggregation.MeanMetric()
-        avg_value_loss = torchmetrics.aggregation.MeanMetric()
         avg_total_loss = torchmetrics.aggregation.MeanMetric()
         avg_best_objective_value = torchmetrics.aggregation.MeanMetric()
 
@@ -287,27 +266,25 @@ if __name__ == "__main__":
             log_probs = []
             rewards = []
             entropies = []
-            values = []
 
             # ==== One Trajectory Acquisition ====
             observation, info = env.reset()
             for t in range(args.max_t):
-                graph_data = env.preprocess(observation).to(device)
+                graph_data = env.preprocess(observation, args.fully_connected).to(device)
 
-                action, log_prob, entropy, value = model.get_action_and_value(graph_data, k=k)
+                action, log_prob, entropy = model.get_action(graph_data, k=k)
                 action = action.cpu().numpy()
                 observation, reward, terminated, truncated, info = env.step(action)
 
                 log_probs.append(log_prob)
                 rewards.append(reward)
                 entropies.append(entropy)
-                values.append(value)
 
                 # ==== Logging ====
                 if args.debug and env_idx == args.representative_instance_idx:
                     log_prob = log_prob.detach().cpu()
                     prob = torch.exp(log_prob).item()
-                    print(f"Step {t:3}, Action: {action}, Log(Prob): {log_prob.item():.4f}, Prob: {prob:.4f}, Entropy: {entropy.item():.4f}, Reward: {reward:.4f}, Value: {value.item():.4f}, Step objective value: {info['step_objective_value']}, k: {int(sum(action))}")
+                    print(f"Step {t:3}, Action: {action}, Log(Prob): {log_prob.item():.4f}, Prob: {prob:.4f}, Entropy: {entropy.item():.4f}, Reward: {reward:.4f}, Step objective value: {info['step_objective_value']}, k: {int(sum(action))}")
 
                 if terminated or truncated:
                     break
@@ -325,23 +302,13 @@ if __name__ == "__main__":
 
             # ==== Loss Calculation ====
             policy_loss = []
-            value_loss = []
-            for log_prob, discounted_return, value in zip(log_probs, returns, values):
-                if args.use_value_baseline:
-                    advantage = discounted_return - value
-                    policy_loss.append(-log_prob * advantage.detach())
-                    value_loss.append(advantage)
-                else:
-                    policy_loss.append(-log_prob * discounted_return)
+            for log_prob, discounted_return in zip(log_probs, returns):
+                policy_loss.append(-log_prob * discounted_return)
 
-            policy_loss = torch.cat(policy_loss).sum()
+            policy_loss = torch.cat(policy_loss).mean()
             # As the regularization, the entropy should be maximized (which equals minimizing its negative)
             entropy = torch.cat(entropies).mean()
-            if args.use_value_baseline:
-                value_loss = torch.cat(value_loss).pow(2).mean()
-                total_loss = policy_loss - args.entropy_coefficient * entropy + 0.5 * value_loss
-            else:
-                total_loss = policy_loss - args.entropy_coefficient * entropy
+            total_loss = policy_loss - args.entropy_coefficient * entropy
 
             # ==== Policy Update ====
             optimizer.zero_grad()
@@ -354,8 +321,6 @@ if __name__ == "__main__":
             avg_total_reward.update(sum(rewards))
             avg_policy_loss.update(policy_loss.item())
             avg_entropy.update(entropy.item())
-            if args.use_value_baseline:
-                avg_value_loss.update(value_loss.item())
             avg_total_loss.update(total_loss.item())
             avg_best_objective_value.update(info["best_objective_value"])
             if env_idx == args.representative_instance_idx:
@@ -363,8 +328,6 @@ if __name__ == "__main__":
             if args.debug:
                 print(f"Policy Loss: {policy_loss.item():.4f}")
                 print(f"Avg. Entropy: {entropy.item():.4f}")
-                if args.use_value_baseline:
-                    print(f"Value Loss: {value_loss:.4f}")
                 print(f"Total Loss: {total_loss.item():.4f}")
 
         # ==== Logging ====
@@ -374,7 +337,6 @@ if __name__ == "__main__":
         "best_objective_value_for_representative_instance": representative_instance_best_objective_value,
             "avg_policy_loss": avg_policy_loss.compute(),
             "avg_entropy": avg_entropy.compute(),
-            "avg_value_loss": avg_value_loss.compute(),
             "avg_total_loss": avg_total_loss.compute(),
         }
         if args.debug:

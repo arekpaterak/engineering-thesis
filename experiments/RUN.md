@@ -9,7 +9,7 @@ Train with REINFORCE on TSP:
 
 n=20
 ```
-python -m experiments.tsp.train.reinforce_multibinary --n-epochs 25 --max-t 20 --track --instances 0 9 --learning-rate 1e-5 --entropy-coefficient 0.0 --proportion 0.2 --max-grad-norm 2 --num-layers 12 --gat-v2 --num-heads 8
+python -m experiments.tsp.train.reinforce_multibinary --n-epochs 100 --max-t 10 --track --instances 0 --learning-rate 1e-3 --entropy-coefficient 0.0 --proportion 0.2 --max-grad-norm 2 --num-layers 12 --gat-v2 --num-heads 8 --no-fully-connected
 ```
 
 n=50

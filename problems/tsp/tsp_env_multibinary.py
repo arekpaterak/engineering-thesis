@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import partial, wraps
-from itertools import combinations
+from itertools import combinations, permutations
 from types import MethodType
 from typing import Optional, List, Self, Dict, Tuple
 
@@ -27,7 +27,8 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
         repair_model_path: str,
         solver_name: str = "gecode",
         max_episode_length: Optional[int] = None,
-        processes: int = 1
+        processes: int = 1,
+        fully_connected: bool = False,
     ):
         super().__init__(
             problem_cls=TravelingSalesmanProblem,
@@ -41,6 +42,7 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
         )
 
         num_nodes = self.problem.num_nodes
+        self.fully_connected = fully_connected
 
         # ==== Observation Space ====
         self.observation_space = gym.spaces.Dict({
@@ -110,10 +112,10 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
         return result
 
     def _reward(self, score, action: np.ndarray[int]):
-        return score
+        return score * (1 + 10*self.episode_length / self.max_episode_length)
 
     @staticmethod
-    def preprocess(observation: dict) -> pyg.data.Data:
+    def preprocess(observation: dict, fully_connected: bool = False) -> pyg.data.Data:
         node_positions = observation['problem']['node_positions']
         node_features = torch.tensor([
             [node['x'], node['y']] for node in node_positions
@@ -121,17 +123,34 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
         pos = node_features.clone()
 
         circuit = observation['solution']['circuit']
-        edges = []
+
+        route_edges = []
         for node, next_node in enumerate(circuit):
-            # edges in two directions are added
-            edges.append((node, next_node))
-            edges.append((next_node, node))
+            # route_edges in two directions are added
+            route_edges.append((node, next_node))
+            route_edges.append((next_node, node))
 
-        edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+        if not fully_connected:
+            edge_index = torch.tensor(route_edges, dtype=torch.long).t().contiguous()
+            edge_attr = torch.tensor([[1] for _ in route_edges], dtype=torch.float)
 
-        edge_attr = torch.tensor([[1] for _ in edges], dtype=torch.float)
+            return pyg.data.Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, pos=pos)
+        else:
+            all_edges = list(permutations(range(len(node_positions)), 2))
 
-        return pyg.data.Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, pos=pos)
+            route_edges_lookup = set(tuple(edge) for edge in route_edges)
+
+            edge_attr = []
+            for edge in all_edges:
+                if edge in route_edges_lookup:
+                    edge_attr.append([1])
+                else:
+                    edge_attr.append([0])
+
+            edge_index = torch.tensor(all_edges, dtype=torch.long).t().contiguous()
+            edge_attr = torch.tensor(edge_attr, dtype=torch.long)
+
+            return pyg.data.Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, pos=pos)
 
 
 if __name__ == "__main__":

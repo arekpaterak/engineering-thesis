@@ -27,11 +27,11 @@ class GraphFeaturesExtractor(nn.Module):
         conv = GATConv if not v2 else GATv2Conv
 
         self.convs = nn.ModuleList([
-            conv(in_channels, hidden_channels, heads=num_heads, concat=True, edge_dim=edge_dim)
+            conv(in_channels, hidden_channels, heads=num_heads, concat=True, edge_dim=edge_dim, dropout=0.6)
         ])
         for _ in range(num_layers - 2):
-            self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=num_heads, concat=True, edge_dim=edge_dim))
-        self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=1, concat=False, edge_dim=edge_dim))
+            self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=num_heads, concat=True, edge_dim=edge_dim, dropout=0.6))
+        self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=1, concat=False, edge_dim=edge_dim, dropout=0.6))
 
         self.fc = Linear(hidden_channels, out_channels)
         self.activation = activation
