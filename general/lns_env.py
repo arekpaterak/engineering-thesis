@@ -62,11 +62,6 @@ class LNSEnvironment(ABC, gym.Env):
             truncated (bool)
             info (dict)
         """
-        info = {
-            "best_objective_value": None,
-            "step_objective_value": None,
-        }
-
         solution, score, terminated, truncated = self.lns.step(action)
 
         self.episode_length += 1
@@ -77,8 +72,10 @@ class LNSEnvironment(ABC, gym.Env):
         observation = self._observation(solution)
         reward = self._reward(score, action)
 
-        info["best_objective_value"] = self.lns.best_solution.objective_value
-        info["step_objective_value"] = self.lns.step_objective_value
+        info = {
+            "best_objective_value": self.lns.best_solution.objective_value,
+            "step_objective_value": self.lns.step_objective_value,
+        }
 
         return observation, reward, terminated, truncated, info
 

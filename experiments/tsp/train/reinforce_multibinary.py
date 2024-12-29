@@ -1,37 +1,24 @@
+import json
 import os
+import random
 import time
 from collections import deque
 from dataclasses import dataclass, field
-import random
 from datetime import datetime
-from dis import disco
-from typing import Callable, Tuple, Optional
+from typing import Tuple, Optional
 
-import gymnasium
 import numpy as np
-
 import torch
-from torch import nn
 import torch.nn.functional as F
-from torch.distributions import Bernoulli
-
 import torch_geometric as pyg
-
 import torchmetrics
-
 import tyro
 import wandb
-from torch.nn import MSELoss
+from torch import nn
+from torch.nn.functional import dropout
 
-from general.ml.features_extractor import GraphFeaturesExtractor
+from general.ml.graph_features_extractor import GraphFeaturesExtractor
 from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
-
-
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    # torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.xavier_normal_(layer.weight, 0.1)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
 
 
 @dataclass
@@ -76,6 +63,7 @@ class Args:
     hidden_channels: int = 64
     out_channels: int = 512
     gat_v2: bool = False
+    dropout: float = 0.0
 
     # Algorithm specific arguments
     learning_rate: float = 1e-3
@@ -86,30 +74,36 @@ class Args:
     """the number of epochs"""
     entropy_coefficient: float = 0.01
     """the entropy coefficient for the entropy regularization"""
-    proportion: float = 0.2
-    """the proportion of the nodes in the problem to destroy in one step"""
+    # proportion: float = 0.2
+    # """the proportion of the nodes in the problem to destroy in one step"""
+    k: int = 4
+    """the number of the nodes to destroy in one step"""
     max_grad_norm: Optional[float] = None
     """the maximum norm for gradient clipping"""
+    normalize_returns: bool = True
 
 
 class Policy(nn.Module):
     def __init__(
         self,
-        graph_features_extractor_kwargs: dict,
+        features_extractor_kwargs: dict,
     ) -> None:
         super().__init__()
 
-        # ==== Shared Network ====
+        # ==== Main Network ====
         self.features_extractor = GraphFeaturesExtractor(
-            **graph_features_extractor_kwargs
+            **features_extractor_kwargs
         )
         features_dim = self.features_extractor.features_dim
 
         # ==== Policy Head ====
-        self.head = nn.Linear(features_dim, 1)
-
-        # ==== Value Estimation Head ====
-        self.value_estimator = nn.Linear(features_dim, 1)
+        self.head = nn.Sequential(
+            nn.Linear(features_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, features_dim),
+            nn.ReLU(),
+            nn.Linear(features_dim, 1)
+        )
 
     def forward(self, x, edge_index, edge_attr=None, batch=None) -> torch.Tensor:
         features = self.features_extractor(x, edge_index, edge_attr)
@@ -117,23 +111,38 @@ class Policy(nn.Module):
 
         return torch.flatten(logits)
 
-    def get_action(self, graph_data: pyg.data.Data, k: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def get_action(self, graph_data: pyg.data.Data, k: int, gumbel_topk: bool = False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x, edge_index, edge_attr = graph_data.x, graph_data.edge_index, graph_data.edge_attr
 
         logits = self.forward(x, edge_index, edge_attr)
 
         prob = F.softmax(logits, dim=-1)
         log_prob = F.log_softmax(logits, dim=-1)
-        action_idx = prob.multinomial(num_samples=k).detach()
 
         entropy = -(log_prob * prob).sum(-1, keepdim=True)
+
+        if gumbel_topk:
+            z = -torch.log(-torch.log(torch.rand_like(prob)))
+            _, action_idx = torch.topk(torch.log(prob) + z, k)
+
+            action_log_prob = []
+            mask = torch.ones_like(prob)
+
+            for idx in action_idx:
+                p_select = prob[idx]
+                action_log_prob.append(torch.log(p_select / (prob * mask).sum()))
+                mask[idx] = 0
+
+            action_log_prob = torch.tensor(action_log_prob)
+        else:
+            action_idx = prob.multinomial(num_samples=k)
+            action_log_prob = log_prob.gather(-1, action_idx)
 
         action = torch.zeros(logits.shape[0])
         action[action_idx] = 1
 
-        log_prob = log_prob.gather(0, action_idx)
-
-        return action, log_prob.sum(-1, keepdim=True), entropy
+        # return action.detach(), action_log_prob.sum(-1, keepdim=True), entropy
+        return action.detach(), action_log_prob, entropy
 
 
 if __name__ == "__main__":
@@ -191,7 +200,7 @@ if __name__ == "__main__":
     )
 
     # ==== Model Creation ====
-    graph_features_extractor_kwargs = dict(
+    model_hparams = dict(
         in_channels=2,
         num_heads=args.num_heads,
         edge_dim=1,
@@ -199,9 +208,10 @@ if __name__ == "__main__":
         v2=args.gat_v2,
         hidden_channels=args.hidden_channels,
         out_channels=args.out_channels,
+        dropout=args.dropout,
     )
     model = Policy(
-        graph_features_extractor_kwargs=graph_features_extractor_kwargs,
+        features_extractor_kwargs=model_hparams,
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
@@ -215,6 +225,7 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             config={
+                "k": args.k,
                 "env": {
                     "n_instances": len(envs),
                     "init_solver": TSP_INIT_SOLVER_PATH,
@@ -229,17 +240,18 @@ if __name__ == "__main__":
                     "num_heads": args.num_heads,
                     "hidden_channels": args.hidden_channels,
                     "out_channels": args.out_channels,
+                    "v2": args.gat_v2,
                 },
-                "algorithm": {
+                "learning": {
                     "learning_rate": args.learning_rate,
                     "gamma": args.gamma,
                     "n_epochs": args.n_epochs,
                     "entropy_coefficient": args.entropy_coefficient,
-                    "proportion": args.proportion,
                     "max_grad_norm": args.max_grad_norm,
                 }
             },
-            job_type="train"
+            job_type="train",
+            group=str(args.max_t),
         )
 
     # ==== Training ====
@@ -261,8 +273,6 @@ if __name__ == "__main__":
             if args.debug:
                 print(f"Env {env_idx}")
 
-            k = int(env.problem.num_nodes * args.proportion)
-
             log_probs = []
             rewards = []
             entropies = []
@@ -272,7 +282,7 @@ if __name__ == "__main__":
             for t in range(args.max_t):
                 graph_data = env.preprocess(observation, args.fully_connected).to(device)
 
-                action, log_prob, entropy = model.get_action(graph_data, k=k)
+                action, log_prob, entropy = model.get_action(graph_data, k=args.k)
                 action = action.cpu().numpy()
                 observation, reward, terminated, truncated, info = env.step(action)
 
@@ -282,7 +292,7 @@ if __name__ == "__main__":
 
                 # ==== Logging ====
                 if args.debug and env_idx == args.representative_instance_idx:
-                    log_prob = log_prob.detach().cpu()
+                    log_prob = log_prob.detach().cpu().sum()
                     prob = torch.exp(log_prob).item()
                     print(f"Step {t:3}, Action: {action}, Log(Prob): {log_prob.item():.4f}, Prob: {prob:.4f}, Entropy: {entropy.item():.4f}, Reward: {reward:.4f}, Step objective value: {info['step_objective_value']}, k: {int(sum(action))}")
 
@@ -294,11 +304,13 @@ if __name__ == "__main__":
             for t in reversed(range(len(rewards))):
                 discounted_return_t = returns[0] if len(returns) > 0 else 0
                 returns.appendleft(args.gamma * discounted_return_t + rewards[t])
+            print(returns)
 
             # ==== Returns Normalization ====
-            eps = np.finfo(np.float32).eps.item()
-            returns = torch.tensor(returns)
-            returns = (returns - returns.mean()) / (returns.std() + eps)
+            if args.normalize_returns:
+                eps = np.finfo(np.float32).eps.item()
+                returns = torch.tensor(returns)
+                returns = (returns - returns.mean()) / (returns.std() + eps)
 
             # ==== Loss Calculation ====
             policy_loss = []
@@ -351,8 +363,13 @@ if __name__ == "__main__":
             model_path = os.path.join(wandb.run.dir, "model.pt")
             torch.save(model.state_dict(), model_path)
 
-            artifact = wandb.Artifact(f"model-{args.proportion}", type="model")
+            model_hparams_path = os.path.join(wandb.run.dir, "hparams.json")
+            with open(model_hparams_path, "w") as f:
+                json.dump(model_hparams, f, indent=4)
+
+            artifact = wandb.Artifact(f"model__k_{args.k}", type="model")
             artifact.add_file(model_path)
+            artifact.add_file(model_hparams_path)
             wandb.log_artifact(artifact)
 
     if args.track:

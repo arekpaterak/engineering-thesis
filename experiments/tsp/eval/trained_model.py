@@ -1,8 +1,9 @@
+import json
 import os
 import random
+import sqlite3
 import time
 from dataclasses import dataclass
-from math import atan2
 from typing import Optional
 
 import numpy as np
@@ -19,7 +20,7 @@ from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
 class Args:
     instance_name: Optional[str] = None
     """the instance on which the method will be run"""
-    instances_dir_name: str = "train"
+    instances_dir_name: str = "generated/train"
     """the name of instances directory"""
     seed: int = 1
     """seed of the experiment"""
@@ -47,8 +48,7 @@ class Args:
     """the solver to use to find an initial solution and repair the subsequent"""
 
     # Algorithm specific arguments
-    proportion: float = 0.2
-    """the proportion of the nodes in the problem to destroy in one step"""
+    k: int = 4
 
 
 if __name__ == '__main__':
@@ -59,8 +59,8 @@ if __name__ == '__main__':
     TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", args.instances_dir_name)
 
     TSP_SOLVERS_DIR = os.path.join(BASE_PATH, "problems", "tsp", "minizinc")
-    TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init.mzn")
-    TSP_REPAIR_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair.mzn")
+    TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init_circuit.mzn")
+    TSP_REPAIR_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair_circuit.mzn")
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     if args.debug:
@@ -75,28 +75,29 @@ if __name__ == '__main__':
     if args.model_name:
         model_name = args.model_name
     else:
-        model_name = f"model-{args.proportion}"
+        model_name = f"model__k_{args.k}"
 
     wandb_api = wandb.Api()
     artifact = wandb_api.artifact(f"{args.wandb_project_name}/{model_name}:{args.model_tag}")
     artifact_dir = artifact.download()
 
     model_path = os.path.join(artifact_dir, "model.pt")
+    model_hparams_path = os.path.join(artifact_dir, "hparams.json")
 
-    graph_features_extractor_kwargs = dict(
-        in_channels=2,
-        num_heads=8,
-        edge_dim=1,
-    )
+    with open(model_hparams_path, "r") as f:
+        model_hparams = json.load(f)
+
     model = Policy(
-        graph_features_extractor_kwargs=graph_features_extractor_kwargs,
+        features_extractor_kwargs=model_hparams,
     )
     model.load_state_dict(torch.load(model_path, weights_only=True))
     model.to(device)
     model.eval()
 
+
     # ==== Loop over problem instances ====
     for instance_idx, instance_path in enumerate(problem_instances_paths):
+        results = []
 
         # ==== Seeding ====
         random.seed(args.seed)
@@ -118,10 +119,7 @@ if __name__ == '__main__':
             max_episode_length=args.max_t,
         )
 
-        proportion = args.proportion
-        if proportion <= 0.0 or proportion > 1.0:
-            raise ValueError("proportion must be between 0.0 and 1.0")
-        k = int(env.problem.num_nodes * proportion)
+        k = args.k
 
         # ==== Main Loop ====
         observation, info = env.reset()
@@ -137,7 +135,7 @@ if __name__ == '__main__':
 
             graph_data = env.preprocess(observation).to(device)
 
-            action, log_prob = model.get_action(graph_data, k=k)
+            action, log_prob, entropy = model.get_action(graph_data, k=k)
             action = action.cpu().numpy()
             observation, reward, terminated, truncated, info = env.step(action)
 
@@ -146,16 +144,13 @@ if __name__ == '__main__':
             # ==== Logging ====
             if args.debug:
                 print(f"Step {step}")
-                print(f"Reward {reward}, Step Objective Value {info['step_objective_value']}, Proportion {proportion}")
+                print(f"Reward: {reward}, Step objective value: {info['step_objective_value']}, k: {k}")
 
             step += 1
 
             # ==== Save to the best results ====
             if step % args.log_every_n_step == 0 or step < 10:
-                TSP_BEST_RESULTS_PATH = os.path.join(BASE_PATH, "problems", "tsp", "data", "best_results.csv")
-                method_name = f"model({args.proportion})"
-
-                df = pd.read_csv(TSP_BEST_RESULTS_PATH)
+                method_name = f"model({args.k}):{args.model_tag}"
 
                 new_record = {
                     "instance": instance_name,
@@ -168,22 +163,63 @@ if __name__ == '__main__':
                     "time": f"{episode_time:.3f}",
                     "avg_time_per_step": f"{(episode_time / step):.3f}"
                 }
-                matching_record = df[
-                    (df['instance'] == new_record['instance']) &
-                    (df['subset'] == new_record['subset']) &
-                    (df['method'] == new_record['method']) &
-                    (df['seed'] == new_record['seed']) &
-                    (df['steps'] == new_record['steps'])
-                ]
 
-                if not matching_record.empty:
-                    idx = matching_record.index[0]
-                    for key, value in new_record.items():
-                        df.loc[idx, key] = value
+                DB_PATH = os.path.join(BASE_PATH, "experiments", "results.db")
+                conn = sqlite3.connect(DB_PATH)
+
+                # Check if the record already exists
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                        SELECT * FROM best_results
+                        WHERE instance = ? AND subset = ? AND method = ? AND seed = ? AND steps = ?
+                    """, (
+                    new_record["instance"], new_record["subset"], new_record["method"], new_record["seed"],
+                    new_record["steps"])
+                )
+
+                existing_record = cursor.fetchone()
+
+                if existing_record:
+                    # If the record exists, update it
+                    cursor.execute(
+                        """
+                            UPDATE best_results
+                            SET objective_value = ?, time = ?, avg_time_per_step = ?
+                            WHERE instance = ? AND subset = ? AND method = ? AND seed = ? AND steps = ?
+                        """, (
+                            new_record["objective_value"],
+                            new_record["time"],
+                            new_record["avg_time_per_step"],
+                            new_record["instance"],
+                            new_record["subset"],
+                            new_record["method"],
+                            new_record["seed"],
+                            new_record["steps"]
+                        )
+                    )
                 else:
-                    df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
+                    # If the record doesn't exist, insert a new record
+                    cursor.execute(
+                        """
+                            INSERT INTO best_results (instance, subset, method, seed, steps, initial_objective_value, objective_value, time, avg_time_per_step)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            new_record["instance"],
+                            new_record["subset"],
+                            new_record["method"],
+                            new_record["seed"],
+                            new_record["steps"],
+                            new_record["initial_objective_value"],
+                            new_record["objective_value"],
+                            new_record["time"],
+                            new_record["avg_time_per_step"]
+                        )
+                    )
 
-                df.to_csv(TSP_BEST_RESULTS_PATH, index=False)
+                # Commit the changes and close the connection
+                conn.commit()
+                conn.close()
 
                 if args.debug:
                     print(f"Solution: {env.lns.best_solution.next}")

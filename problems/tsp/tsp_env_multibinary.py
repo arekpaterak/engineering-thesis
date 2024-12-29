@@ -112,13 +112,13 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
         return result
 
     def _reward(self, score, action: np.ndarray[int]):
-        return score * (1 + 10*self.episode_length / self.max_episode_length)
+        return score
 
     @staticmethod
     def preprocess(observation: dict, fully_connected: bool = False) -> pyg.data.Data:
         node_positions = observation['problem']['node_positions']
         node_features = torch.tensor([
-            [node['x'], node['y']] for node in node_positions
+            [node['x'] / 1000, node['y'] / 1000] for node in node_positions
         ], dtype=torch.float)
         pos = node_features.clone()
 
@@ -148,7 +148,7 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
                     edge_attr.append([0])
 
             edge_index = torch.tensor(all_edges, dtype=torch.long).t().contiguous()
-            edge_attr = torch.tensor(edge_attr, dtype=torch.long)
+            edge_attr = torch.tensor(edge_attr, dtype=torch.float)
 
             return pyg.data.Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, pos=pos)
 

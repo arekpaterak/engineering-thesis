@@ -1,26 +1,16 @@
 import os
-import time
-from collections import deque
-from dataclasses import dataclass, field
 import random
-from typing import Callable, Tuple, Optional
+import sqlite3
+import time
+from dataclasses import dataclass
+from typing import Optional
 
-import gymnasium
 import numpy as np
 import pandas as pd
-import torch
-import torchmetrics.aggregation
-from torch import nn
-from torch.distributions import Bernoulli
-
-import torch_geometric as pyg
-
 import tyro
-import wandb
 
-from experiments.playground import action
-from general.ml.features_extractor import GraphFeaturesExtractor
 from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
+
 
 @dataclass
 class Args:
@@ -44,8 +34,9 @@ class Args:
     """the number of processes to use in MiniZinc"""
 
     # Algorithm specific arguments
-    proportion: float = 0.2
-    """the proportion of the nodes in the problem to destroy in one step"""
+    # proportion: float = 0.2
+    # """the proportion of the nodes in the problem to destroy in one step"""
+    k: int = 4
 
 
 if __name__ == '__main__':
@@ -88,10 +79,7 @@ if __name__ == '__main__':
             processes=args.processes,
         )
 
-        proportion = args.proportion
-        if proportion <= 0.0 or proportion > 1.0:
-            raise ValueError("proportion must be between 0.0 and 1.0")
-        k = int(env.problem.num_nodes * proportion)
+        k = args.k
 
         # ==== Main Loop ====
         obs, info = env.reset()
@@ -121,10 +109,7 @@ if __name__ == '__main__':
 
             # ==== Save to the best results ====
             if step % args.log_every_n_step == 0 or step < 10:
-                TSP_BEST_RESULTS_PATH = os.path.join(BASE_PATH, "problems", "tsp", "data", "best_results.csv")
-                method_name = f"random({args.proportion})"
-
-                df = pd.read_csv(TSP_BEST_RESULTS_PATH)
+                method_name = f"random({args.k})"
 
                 new_record = {
                     "instance": instance_name,
@@ -138,22 +123,62 @@ if __name__ == '__main__':
                     "avg_time_per_step": f"{(episode_time / step):.3f}"
                 }
 
-                matching_record = df[
-                    (df['instance'] == new_record['instance']) &
-                    (df['subset'] == new_record['subset']) &
-                    (df['method'] == new_record['method']) &
-                    (df['seed'] == new_record['seed']) &
-                    (df['steps'] == new_record['steps'])
-                ]
+                DB_PATH = os.path.join(BASE_PATH, "experiments", "results.db")
+                conn = sqlite3.connect(DB_PATH)
 
-                if not matching_record.empty:
-                    idx = matching_record.index[0]
-                    for key, value in new_record.items():
-                        df.loc[idx, key] = value
+                # Check if the record already exists
+                cursor = conn.cursor()
+                cursor.execute(
+                """
+                        SELECT * FROM best_results
+                        WHERE instance = ? AND subset = ? AND method = ? AND seed = ? AND steps = ?
+                    """, (
+                new_record["instance"], new_record["subset"], new_record["method"], new_record["seed"],
+                new_record["steps"])
+                )
+
+                existing_record = cursor.fetchone()
+
+                if existing_record:
+                    # If the record exists, update it
+                    cursor.execute(
+                    """
+                            UPDATE best_results
+                            SET objective_value = ?, time = ?, avg_time_per_step = ?
+                            WHERE instance = ? AND subset = ? AND method = ? AND seed = ? AND steps = ?
+                        """, (
+                            new_record["objective_value"],
+                            new_record["time"],
+                            new_record["avg_time_per_step"],
+                            new_record["instance"],
+                            new_record["subset"],
+                            new_record["method"],
+                            new_record["seed"],
+                            new_record["steps"]
+                        )
+                    )
                 else:
-                    df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
+                    # If the record doesn't exist, insert a new record
+                    cursor.execute(
+                    """
+                            INSERT INTO best_results (instance, subset, method, seed, steps, initial_objective_value, objective_value, time, avg_time_per_step)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                        new_record["instance"],
+                        new_record["subset"],
+                        new_record["method"],
+                        new_record["seed"],
+                        new_record["steps"],
+                        new_record["initial_objective_value"],
+                        new_record["objective_value"],
+                        new_record["time"],
+                        new_record["avg_time_per_step"]
+                    )
+                )
 
-                df.to_csv(TSP_BEST_RESULTS_PATH, index=False)
+                # Commit the changes and close the connection
+                conn.commit()
+                conn.close()
 
                 if args.debug:
                     print(f"Solution: {env.lns.best_solution.next}")

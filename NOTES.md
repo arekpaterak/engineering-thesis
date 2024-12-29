@@ -1,7 +1,7 @@
 # Notes
 
 ## Auto reload for local imports in Jupyter Notebooks
-Works generally for all imports.
+Works for all imports.
 ```python
 %load_ext autoreload
 %autoreload 2

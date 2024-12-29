@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Callable
 
 import torch
@@ -21,73 +22,30 @@ class GraphFeaturesExtractor(nn.Module):
         num_heads: int = 1,
         v2: bool = False,
         activation: Callable = F.relu,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
 
         conv = GATConv if not v2 else GATv2Conv
+        conv = partial(conv, edge_dim=edge_dim, dropout=dropout)
 
         self.convs = nn.ModuleList([
-            conv(in_channels, hidden_channels, heads=num_heads, concat=True, edge_dim=edge_dim, dropout=0.6)
+            conv(in_channels, hidden_channels, heads=num_heads, concat=True)
         ])
         for _ in range(num_layers - 2):
-            self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=num_heads, concat=True, edge_dim=edge_dim, dropout=0.6))
-        self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=1, concat=False, edge_dim=edge_dim, dropout=0.6))
-
+            self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=num_heads, concat=True))
+        self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=1, concat=False))
         self.fc = Linear(hidden_channels, out_channels)
-        self.activation = activation
 
+        self.activation = activation
         self.features_dim = out_channels
 
     def forward(self, x, edge_index, edge_attr=None) -> torch.Tensor:
         for layer in self.convs:
             x = self.activation(layer(x, edge_index, edge_attr))
-        x = torch.flatten(x, start_dim=1)
+        # x = torch.flatten(x, start_dim=1)
         x = self.activation(self.fc(x))
         return x
-
-
-class SequentialGraphFeaturesExtractor(nn.Module):
-    """
-    The GraphFeatureExtractor implemented with the PyTorch Geometric `nn.Sequential`.
-    """
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int = 512,
-        edge_dim: int = None,
-        num_heads: int = 1,
-        v2: bool = False,
-        activation: nn.Module = nn.ReLU,
-    ):
-        super().__init__()
-
-        conv = GATConv if not v2 else GATv2Conv
-        self.net = Sequential(
-            "x, edge_index, edge_attr",
-            [
-                (
-                    conv(
-                        in_channels, 32, heads=num_heads, concat=True, edge_dim=edge_dim
-                    ),
-                    "x, edge_index, edge_attr -> x"
-                ),
-                activation(),
-                (
-                    conv(32 * num_heads,64, heads=num_heads, concat=True, edge_dim=edge_dim),
-                    "x, edge_index, edge_attr -> x"
-                ),
-                activation(),
-                (
-                    conv(64 * num_heads, 64, heads=1, concat=False, edge_dim=edge_dim),
-                    "x, edge_index, edge_attr -> x"
-                ),
-                activation(),
-                Linear(64, out_channels),
-            ],
-        )
-
-    def forward(self, x, edge_index, edge_attr):
-        self.net(x, edge_index, edge_attr)
 
 
 if __name__ == "__main__":

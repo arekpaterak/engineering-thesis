@@ -9,7 +9,7 @@ from torch.cuda import graph
 from torch_geometric import edge_index
 from torch_geometric.nn import global_mean_pool
 
-from general.ml.features_extractor import GraphFeaturesExtractor
+from general.ml.graph_features_extractor import GraphFeaturesExtractor
 from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
 
 

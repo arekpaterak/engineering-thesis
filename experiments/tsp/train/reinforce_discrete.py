@@ -20,7 +20,7 @@ import torchmetrics
 import tyro
 import wandb
 
-from general.ml.features_extractor import GraphFeaturesExtractor
+from general.ml.graph_features_extractor import GraphFeaturesExtractor
 from problems.tsp.tsp_env_discrete import TSPEnvironmentDiscrete
 
 
