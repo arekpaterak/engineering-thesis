@@ -94,140 +94,140 @@ if __name__ == '__main__':
     model.to(device)
     model.eval()
 
+    with torch.no_grad():
+        # ==== Loop over problem instances ====
+        for instance_idx, instance_path in enumerate(problem_instances_paths):
+            results = []
 
-    # ==== Loop over problem instances ====
-    for instance_idx, instance_path in enumerate(problem_instances_paths):
-        results = []
+            # ==== Seeding ====
+            random.seed(args.seed)
+            np.random.seed(args.seed)
+            torch.manual_seed(args.seed)
+            torch.backends.cudnn.deterministic = args.torch_deterministic
 
-        # ==== Seeding ====
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        torch.backends.cudnn.deterministic = args.torch_deterministic
+            instance_name = os.path.basename(instance_path).rstrip(".json")
 
-        instance_name = os.path.basename(instance_path).rstrip(".json")
-
-        if args.debug:
-            print(f"Instance {instance_idx}: {instance_name}")
-
-        # ==== Environment Creation ====
-        env = TSPEnvironmentMultiBinary(
-            problem_instance_path=instance_path,
-            init_model_path=TSP_INIT_SOLVER_PATH,
-            repair_model_path=TSP_REPAIR_SOLVER_PATH,
-            solver_name=args.solver,
-            max_episode_length=args.max_t,
-        )
-
-        k = args.k
-
-        # ==== Main Loop ====
-        observation, info = env.reset()
-
-        initial_objective_value = info["best_objective_value"]
-        if args.debug:
-           print(f"Initial solution objective value: {initial_objective_value}")
-
-        step = 0
-        episode_time = 0.0
-        while True:
-            step_start_time = time.perf_counter()
-
-            graph_data = env.preprocess(observation).to(device)
-
-            action, log_prob, entropy = model.get_action(graph_data, k=k)
-            action = action.cpu().numpy()
-            observation, reward, terminated, truncated, info = env.step(action)
-
-            episode_time += time.perf_counter() - step_start_time
-
-            # ==== Logging ====
             if args.debug:
-                print(f"Step {step}")
-                print(f"Reward: {reward}, Step objective value: {info['step_objective_value']}, k: {k}")
+                print(f"Instance {instance_idx}: {instance_name}")
 
-            step += 1
+            # ==== Environment Creation ====
+            env = TSPEnvironmentMultiBinary(
+                problem_instance_path=instance_path,
+                init_model_path=TSP_INIT_SOLVER_PATH,
+                repair_model_path=TSP_REPAIR_SOLVER_PATH,
+                solver_name=args.solver,
+                max_episode_length=args.max_t,
+            )
 
-            # ==== Save to the best results ====
-            if step % args.log_every_n_step == 0 or step < 10:
-                method_name = f"model({args.k}):{args.model_tag}"
+            k = args.k
 
-                new_record = {
-                    "instance": instance_name,
-                    "subset": "test" if "test" in args.instances_dir_name else "train",
-                    "method": method_name,
-                    "seed": args.seed,
-                    "steps": step,
-                    "initial_objective_value": initial_objective_value,
-                    "objective_value": info["best_objective_value"],
-                    "time": f"{episode_time:.3f}",
-                    "avg_time_per_step": f"{(episode_time / step):.3f}"
-                }
+            # ==== Main Loop ====
+            observation, info = env.reset()
 
-                DB_PATH = os.path.join(BASE_PATH, "experiments", "results.db")
-                conn = sqlite3.connect(DB_PATH)
+            initial_objective_value = info["best_objective_value"]
+            if args.debug:
+               print(f"Initial solution objective value: {initial_objective_value}")
 
-                # Check if the record already exists
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                        SELECT * FROM best_results
-                        WHERE instance = ? AND subset = ? AND method = ? AND seed = ? AND steps = ?
-                    """, (
-                    new_record["instance"], new_record["subset"], new_record["method"], new_record["seed"],
-                    new_record["steps"])
-                )
+            step = 0
+            episode_time = 0.0
+            while True:
+                step_start_time = time.perf_counter()
 
-                existing_record = cursor.fetchone()
+                graph_data = env.preprocess(observation).to(device)
 
-                if existing_record:
-                    # If the record exists, update it
+                action, log_prob, entropy = model.get_action(graph_data, k=k)
+                action = action.cpu().numpy()
+                observation, reward, terminated, truncated, info = env.step(action)
+
+                episode_time += time.perf_counter() - step_start_time
+
+                # ==== Logging ====
+                if args.debug:
+                    print(f"Step {step}")
+                    print(f"Reward: {reward}, Step objective value: {info['step_objective_value']}, k: {k}")
+
+                step += 1
+
+                # ==== Save to the best results ====
+                if step % args.log_every_n_step == 0 or step < 10:
+                    method_name = f"model({args.k}):{args.model_tag}"
+
+                    new_record = {
+                        "instance": instance_name,
+                        "subset": "test" if "test" in args.instances_dir_name else "train",
+                        "method": method_name,
+                        "seed": args.seed,
+                        "steps": step,
+                        "initial_objective_value": initial_objective_value,
+                        "objective_value": info["best_objective_value"],
+                        "time": f"{episode_time:.3f}",
+                        "avg_time_per_step": f"{(episode_time / step):.3f}"
+                    }
+
+                    DB_PATH = os.path.join(BASE_PATH, "experiments", "results.db")
+                    conn = sqlite3.connect(DB_PATH)
+
+                    # Check if the record already exists
+                    cursor = conn.cursor()
                     cursor.execute(
                         """
-                            UPDATE best_results
-                            SET objective_value = ?, time = ?, avg_time_per_step = ?
+                            SELECT * FROM best_results
                             WHERE instance = ? AND subset = ? AND method = ? AND seed = ? AND steps = ?
                         """, (
-                            new_record["objective_value"],
-                            new_record["time"],
-                            new_record["avg_time_per_step"],
-                            new_record["instance"],
-                            new_record["subset"],
-                            new_record["method"],
-                            new_record["seed"],
-                            new_record["steps"]
-                        )
-                    )
-                else:
-                    # If the record doesn't exist, insert a new record
-                    cursor.execute(
-                        """
-                            INSERT INTO best_results (instance, subset, method, seed, steps, initial_objective_value, objective_value, time, avg_time_per_step)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            new_record["instance"],
-                            new_record["subset"],
-                            new_record["method"],
-                            new_record["seed"],
-                            new_record["steps"],
-                            new_record["initial_objective_value"],
-                            new_record["objective_value"],
-                            new_record["time"],
-                            new_record["avg_time_per_step"]
-                        )
+                        new_record["instance"], new_record["subset"], new_record["method"], new_record["seed"],
+                        new_record["steps"])
                     )
 
-                # Commit the changes and close the connection
-                conn.commit()
-                conn.close()
+                    existing_record = cursor.fetchone()
 
-                if args.debug:
-                    print(f"Solution: {env.lns.best_solution.next}")
-                    print(f"Objective value: {info['best_objective_value']}")
-                    print(f"Measured time: {episode_time:.3f} s")
-                    print(f"Average time per one step: {(episode_time / step):.3f} s")
+                    if existing_record:
+                        # If the record exists, update it
+                        cursor.execute(
+                            """
+                                UPDATE best_results
+                                SET objective_value = ?, time = ?, avg_time_per_step = ?
+                                WHERE instance = ? AND subset = ? AND method = ? AND seed = ? AND steps = ?
+                            """, (
+                                new_record["objective_value"],
+                                new_record["time"],
+                                new_record["avg_time_per_step"],
+                                new_record["instance"],
+                                new_record["subset"],
+                                new_record["method"],
+                                new_record["seed"],
+                                new_record["steps"]
+                            )
+                        )
+                    else:
+                        # If the record doesn't exist, insert a new record
+                        cursor.execute(
+                            """
+                                INSERT INTO best_results (instance, subset, method, seed, steps, initial_objective_value, objective_value, time, avg_time_per_step)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                new_record["instance"],
+                                new_record["subset"],
+                                new_record["method"],
+                                new_record["seed"],
+                                new_record["steps"],
+                                new_record["initial_objective_value"],
+                                new_record["objective_value"],
+                                new_record["time"],
+                                new_record["avg_time_per_step"]
+                            )
+                        )
 
-            if terminated or truncated:
-                break
+                    # Commit the changes and close the connection
+                    conn.commit()
+                    conn.close()
+
+                    if args.debug:
+                        print(f"Solution: {env.lns.best_solution.next}")
+                        print(f"Objective value: {info['best_objective_value']}")
+                        print(f"Measured time: {episode_time:.3f} s")
+                        print(f"Average time per one step: {(episode_time / step):.3f} s")
+
+                if terminated or truncated:
+                    break
 
     wandb.finish()

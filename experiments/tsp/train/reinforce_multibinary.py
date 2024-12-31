@@ -3,8 +3,10 @@ import os
 import random
 import time
 from collections import deque
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial, partialmethod
 from typing import Tuple, Optional
 
 import numpy as np
@@ -61,9 +63,10 @@ class Args:
     num_layers: int = 5
     num_heads: int = 8
     hidden_channels: int = 64
-    out_channels: int = 512
+    out_channels: int = 1
     gat_v2: bool = False
     dropout: float = 0.0
+    gumbel_topk: bool = False
 
     # Algorithm specific arguments
     learning_rate: float = 1e-3
@@ -100,49 +103,48 @@ class Policy(nn.Module):
         self.head = nn.Sequential(
             nn.Linear(features_dim, 128),
             nn.ReLU(),
-            nn.Linear(128, features_dim),
+            nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Linear(features_dim, 1)
+            nn.Linear(64, 1)
         )
 
     def forward(self, x, edge_index, edge_attr=None, batch=None) -> torch.Tensor:
         features = self.features_extractor(x, edge_index, edge_attr)
-        logits = self.head(features)
+        # logits = self.head(features)
 
-        return torch.flatten(logits)
+        return torch.flatten(features)
 
-    def get_action(self, graph_data: pyg.data.Data, k: int, gumbel_topk: bool = False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def get_action(self, graph_data: pyg.data.Data, k: int, greedy: bool = False, gumbel_topk: bool = True) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x, edge_index, edge_attr = graph_data.x, graph_data.edge_index, graph_data.edge_attr
 
         logits = self.forward(x, edge_index, edge_attr)
+        # print(logits)
 
         prob = F.softmax(logits, dim=-1)
         log_prob = F.log_softmax(logits, dim=-1)
 
+        # print(prob)
+
         entropy = -(log_prob * prob).sum(-1, keepdim=True)
 
-        if gumbel_topk:
-            z = -torch.log(-torch.log(torch.rand_like(prob)))
-            _, action_idx = torch.topk(torch.log(prob) + z, k)
-
-            action_log_prob = []
-            mask = torch.ones_like(prob)
-
-            for idx in action_idx:
-                p_select = prob[idx]
-                action_log_prob.append(torch.log(p_select / (prob * mask).sum()))
-                mask[idx] = 0
-
-            action_log_prob = torch.tensor(action_log_prob)
+        if not greedy:
+            if gumbel_topk:
+                z = -torch.log(-torch.log(torch.rand_like(prob)))
+                _, action_idx = torch.topk(torch.log(prob) + z, k)
+            else:
+                action_idx = prob.multinomial(num_samples=k)
         else:
-            action_idx = prob.multinomial(num_samples=k)
-            action_log_prob = log_prob.gather(-1, action_idx)
+            _, action_idx = torch.topk(prob, k)
+
+        action_log_prob = log_prob.gather(-1, action_idx)
 
         action = torch.zeros(logits.shape[0])
         action[action_idx] = 1
 
-        # return action.detach(), action_log_prob.sum(-1, keepdim=True), entropy
-        return action.detach(), action_log_prob, entropy
+        return action.detach(), action_log_prob.sum(-1, keepdim=True), entropy
+        # return action.detach(), action_log_prob, entropy
+
+    get_greedy_action = partialmethod(get_action, greedy=True)
 
 
 if __name__ == "__main__":
@@ -201,7 +203,7 @@ if __name__ == "__main__":
 
     # ==== Model Creation ====
     model_hparams = dict(
-        in_channels=2,
+        in_channels=3,
         num_heads=args.num_heads,
         edge_dim=1,
         num_layers=args.num_layers,
@@ -281,8 +283,7 @@ if __name__ == "__main__":
             observation, info = env.reset()
             for t in range(args.max_t):
                 graph_data = env.preprocess(observation, args.fully_connected).to(device)
-
-                action, log_prob, entropy = model.get_action(graph_data, k=args.k)
+                action, log_prob, entropy = model.get_action(graph_data, k=args.k, gumbel_topk=args.gumbel_topk)
                 action = action.cpu().numpy()
                 observation, reward, terminated, truncated, info = env.step(action)
 
@@ -304,7 +305,8 @@ if __name__ == "__main__":
             for t in reversed(range(len(rewards))):
                 discounted_return_t = returns[0] if len(returns) > 0 else 0
                 returns.appendleft(args.gamma * discounted_return_t + rewards[t])
-            print(returns)
+            if args.debug:
+                print(f"Returns: {returns}")
 
             # ==== Returns Normalization ====
             if args.normalize_returns:

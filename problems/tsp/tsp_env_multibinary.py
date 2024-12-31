@@ -19,7 +19,6 @@ from problems.tsp.tsp_lns import TSPSolver
 
 
 class TSPEnvironmentMultiBinary(LNSEnvironment):
-
     def __init__(
         self,
         problem_instance_path: str,
@@ -65,6 +64,14 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
         # ==== Action Space ====
         self.action_space: MultiBinaryWithLimitedSampling = MultiBinaryWithLimitedSampling(num_nodes)
 
+        self.action_counter = np.array([0.0 for _ in range(num_nodes)])
+
+    def reset(self):
+        self.action_counter = np.array([0.0 for _ in range(self.problem.num_nodes)])
+
+        observation, info = super().reset()
+        return observation, info
+
     def step(self, action: np.ndarray):
         """
         Args:
@@ -78,6 +85,10 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
             info (dict)
         """
         solution, score, terminated, truncated, lns_info = self.lns.step(action)
+
+        if score != 0:
+            self.action_counter *= 0
+        self.action_counter += action
 
         self.episode_length += 1
         if self.max_episode_length:
@@ -98,7 +109,7 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
         return observation, reward, terminated, truncated, info
 
     def _observation(self, solution) -> dict:
-        circuit = [n-1 for n in solution.next]
+        circuit = minizinc_circuit_to_python(solution.next)
 
         result = {
             "problem": {
@@ -108,6 +119,7 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
                 "route": route_from_circuit(circuit),
                 "circuit": circuit,
             },
+            "how_many_times_node_chosen": self.action_counter.tolist()
         }
         return result
 
@@ -117,8 +129,9 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
     @staticmethod
     def preprocess(observation: dict, fully_connected: bool = False) -> pyg.data.Data:
         node_positions = observation['problem']['node_positions']
+        how_many_times_node_chosen = observation['how_many_times_node_chosen']
         node_features = torch.tensor([
-            [node['x'] / 1000, node['y'] / 1000] for node in node_positions
+            [node['x'] / 1000, node['y'] / 1000, times] for node, times in zip(node_positions, how_many_times_node_chosen)
         ], dtype=torch.float)
         pos = node_features.clone()
 
@@ -176,22 +189,16 @@ if __name__ == "__main__":
     plt = draw_graph(graph)
     plt.show()
 
-    action = env.action_space.sample()
-    print(f"A sample action: {action}")
-    obs, _, _, _, info = env.step(action)
-    print(f"Route:\n{obs['solution']['route']}")
-    print(f"Circuit:\n{obs['solution']['circuit']}")
-    print(f"Info:\n{info}\n")
-    graph = env.preprocess(obs)
-    plt = draw_graph(graph)
-    plt.show()
-
     action = env.action_space.sample_limited(k=4)
     print(f"A restricted sample action: {action}")
     obs, _, _, _, info = env.step(action)
+    print(f"\nObservation:\n{obs}")
     print(f"Route:\n{obs['solution']['route']}")
     print(f"Circuit:\n{obs['solution']['circuit']}")
     print(f"Info:\n{info}")
     graph = env.preprocess(obs)
     plt = draw_graph(graph)
     plt.show()
+
+    obs, _, _, _, info = env.step(action )
+    print(f"\nObservation:\n{obs}")

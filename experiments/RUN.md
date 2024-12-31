@@ -22,9 +22,9 @@ n=100
 python -m experiments.tsp.train.reinforce_multibinary --n-epochs 10 --max-t 50 --track --instances 0 --problem-sizes 100 --learning-rate 1e-5 --entropy-coefficient 1.0 --proportion 0.2 --max-grad-norm 2
 ```
 
-n=10
+Experimental:
 ```
-python -m experiments.tsp.train.reinforce_multibinary --n-epochs 100 --max-t 10 --track --instances 0 --learning-rate 1e-3 --entropy-coefficient 0.0 --k 4 --max-grad-norm 2 --num-layers 3 --gat-v2 --num-heads 8 --fully-connected --no-normalize-returns --problem-sizes 10
+python -m experiments.tsp.train.reinforce_multibinary --n-epochs 100 --max-t 10 --track --instances 0 --learning-rate 1e-2 --entropy-coefficient 0.0 --k 4 --max-grad-norm 2 --num-layers 3 --gat-v2 --num-heads 8 --no-fully-connected --no-normalize-returns --problem-sizes 20 --gamma 0.0 --dropout 0.1
 ```
 
 ### CVRP

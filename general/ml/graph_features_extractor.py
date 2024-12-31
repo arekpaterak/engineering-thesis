@@ -27,24 +27,25 @@ class GraphFeaturesExtractor(nn.Module):
         super().__init__()
 
         conv = GATConv if not v2 else GATv2Conv
-        conv = partial(conv, edge_dim=edge_dim, dropout=dropout)
+        conv = partial(conv, edge_dim=edge_dim)
 
         self.convs = nn.ModuleList([
             conv(in_channels, hidden_channels, heads=num_heads, concat=True)
         ])
         for _ in range(num_layers - 2):
             self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=num_heads, concat=True))
-        self.convs.append(conv(hidden_channels * num_heads, hidden_channels, heads=1, concat=False))
-        self.fc = Linear(hidden_channels, out_channels)
+        self.convs.append(conv(hidden_channels * num_heads, out_channels, heads=1, concat=False))
 
         self.activation = activation
+        self.dropout = dropout
+
         self.features_dim = out_channels
 
     def forward(self, x, edge_index, edge_attr=None) -> torch.Tensor:
-        for layer in self.convs:
+        for layer in self.convs[:-1]:
             x = self.activation(layer(x, edge_index, edge_attr))
-        # x = torch.flatten(x, start_dim=1)
-        x = self.activation(self.fc(x))
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        x = self.convs[-1](x, edge_index, edge_attr)
         return x
 
 
