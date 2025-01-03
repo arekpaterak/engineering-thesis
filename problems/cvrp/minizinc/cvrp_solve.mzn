@@ -22,59 +22,44 @@ set of int: TIME = 0..timeBudget;
 set of int: LOAD = 0..Capacity;
 
 % the last nodes represent the start and end node for each vehicle (the depot)
-set of int: NODES = 1..nbCustomers+2*nbVehicles;
+set of int: NODES = 1..nbCustomers+2*nbVehicles; 
 set of int: DEPOT_NODES = nbCustomers+1..nbCustomers+2*nbVehicles;
 set of int: START_DEPOT_NODES = nbCustomers+1..nbCustomers+nbVehicles;
 set of int: END_DEPOT_NODES = nbCustomers+nbVehicles+1..nbCustomers+2*nbVehicles;
 
 array[1..N] of int: Demand; % demand from MIP model
 array[NODES] of int: demand = [  % adapting demand to giant tour representation
-  if i <= N then
+  if i <= N then 
     Demand[i]
-  else
+  else 
     0
   endif
-| i in NODES];
+| i in NODES]; 
 
 array[1..N+1, 1..N+1] of int: Distance; % distance matrix from MIP model
 % adapting distance matrix to giant tour representation
-array[NODES, NODES] of int: distance = array2d(NODES,NODES,[
-  if i<=nbCustomers /\ j <= nbCustomers then
+array[NODES, NODES] of int: distance = array2d(NODES,NODES,[           
+  if i<=nbCustomers /\ j <= nbCustomers then 
     Distance[i+1,j+1]
   elseif i<=nbCustomers /\ j>nbCustomers then % depot-customer
     Distance[1,i+1]
   elseif j<=nbCustomers /\ i>nbCustomers then % customer-depot
     Distance[j+1,1]
-  else
+  else 
     Distance[1,1] % depot-depot
   endif
-   | i,j in NODES ]);
+   | i,j in NODES ]);  
 
 % =================================================%
 % Variables
 % =================================================%
 
-array[NODES] of var NODES: successor;
+array[NODES] of var NODES: successor; 
 array[NODES] of var NODES: predecessor; % redundant predecessor variables
 array[NODES] of var VEHICLE: vehicle; % which vehicle visits which customer?
 array[NODES] of var LOAD: load; % load when arriving at node n in NODES
 array[NODES] of var TIME: arrivalTime; % the time at which the vehicle serving node i will arrive at i
 var 0..timeBudget: objective;
-
-
-% =================================================%
-% Fixed Variables + Constraints
-% =================================================%
-array[NODES] of var 0..NODES: fixed_successor;
-array[NODES] of var 0..VEHICLE: fixed_vehicle;
-
-constraint forall(i in NODES where fixed_successor[i] != 0)(
-    successor[i] = fixed_successor[i]
-);
-
-constraint forall(i in NODES where fixed_vehicle[i] != 0)(
-    vehicle[i] = fixed_vehicle[i]
-);
 
 % =================================================%
 % Constraints
@@ -93,32 +78,32 @@ constraint redundant_constraint(
 );
 
 % successors of end nodes are start nodes
-constraint
+constraint 
    forall(n in (nbCustomers+nbVehicles+1..nbCustomers+2*nbVehicles-1)) (
-     successor[n] = n-nbVehicles+1
+     successor[n] = n-nbVehicles+1 
    );
 constraint
    successor[nbCustomers+2*nbVehicles] = nbCustomers+1;
 
 % associate each start/end nodes with a vehicle
-constraint
+constraint 
    forall(n in START_DEPOT_NODES) (
      vehicle[n] = n-nbCustomers
    );
-
-constraint
+   
+constraint 
    forall(n in END_DEPOT_NODES) (
      vehicle[n] = n-nbCustomers-nbVehicles
    );
 
 % vehicles leave the depot at time zero
-constraint
+constraint 
    forall(n in START_DEPOT_NODES) (
-     arrivalTime[n] = 0
+     arrivalTime[n] = 0 
    );
 
 % vehicle load when starting at the depot
-constraint
+constraint 
    forall(n in START_DEPOT_NODES) (
      load[n] = 0 % demand[n]
    );
@@ -138,7 +123,7 @@ constraint redundant_constraint(
 );
 
 % alldiff + subtour elimination constraints
-constraint
+constraint 
    circuit(successor);
 constraint redundant_constraint(
    circuit(predecessor)
@@ -153,7 +138,7 @@ constraint redundant_constraint(
       vehicle[predecessor[n]] = vehicle[n]
    )
 );
-constraint
+constraint 
    forall(n in CUSTOMER) (
       vehicle[successor[n]] = vehicle[n]
    );
@@ -161,7 +146,7 @@ constraint
 
 % ----- time constraints ------------ %
 
-constraint
+constraint 
    forall(n in CUSTOMER) (
       arrivalTime[n] + distance[n,successor[n]] <= arrivalTime[successor[n]]
    );
@@ -172,13 +157,13 @@ constraint
 
 % ----- load constraints ------------ %
 
-constraint
+constraint 
    forall(n in CUSTOMER) (
       load[n] + demand[n] = load[successor[n]]
    );
 constraint
    forall(n in START_DEPOT_NODES) (
-      load[n] = load[successor[n]]
+      load[n] = load[successor[n]] 
    );
 
 
@@ -193,7 +178,7 @@ solve :: seq_search([int_search([successor[j] | j in NODES], first_fail, indomai
                int_search(vehicle, first_fail, indomain_split, complete),
                int_search([arrivalTime[j] | j in NODES],first_fail, indomain_min, complete),
                int_search([load[j] | j in NODES], first_fail, indomain_min, complete)
-              ])
+              ])   
 minimize objective; % traveltime
 
 
@@ -201,11 +186,11 @@ minimize objective; % traveltime
 % Output
 % ===================================== %
 
-output
+output 
    [ "objective = "] ++ [show(objective)] ++
    [ ";\nvehicle = " ] ++ [ show(vehicle) ]++
-   [ ";\narrivalTime = " ] ++
-   [ show(arrivalTime) ]  ++
+   [ ";\narrivalTime = " ] ++ 
+   [ show(arrivalTime) ]  ++ 
    [ ";\nsuccessor = "] ++          [ show(successor) ] ++
 %            | n in NODES  ++
    [ ";\n"]

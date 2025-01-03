@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, InitVar
-from typing import Self
 
-from PyQt5.QtCore import fixed
 from minizinc import Instance
 
 from general.lns.solution import CPPartialSolution, CPSolution
