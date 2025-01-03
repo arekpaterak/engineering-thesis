@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, InitVar
 
+import numpy as np
 from minizinc import Instance
 
 from general.lns.solution import CPPartialSolution, CPSolution
+from general.lns.solver import CPSolver
 
 
 @dataclass
@@ -14,7 +16,7 @@ class CVRPPartialSolution(CPPartialSolution):
     fixed_vehicle: list[int]
 
     def to_output(self) -> str:
-        return f"fixed_successor = {self.fixed_successor};"
+        return f"fixed_successor = {self.fixed_successor}; fixed_vehicle = {self.fixed_vehicle}"
 
     def fix_instance(self, instance: Instance):
         instance["fixed_successor"] = self.fixed_successor
@@ -27,6 +29,10 @@ class CVRPSolution(CPSolution):
     vehicle: list[int]
     total_distance: int
 
+    predecessor: list[int]
+    load: list[int]
+    arrivalTime: list[int]
+
     # attribute required to be used by the MiniZinc library (stores objective in optimization problems)
     objective: int = 0
     # attribute required to be used by the MiniZinc library
@@ -35,6 +41,7 @@ class CVRPSolution(CPSolution):
     def to_output(self) -> str:
         return "\n".join([
             f"successor = {self.successor};",
+            f"vehicle = {self.vehicle};",
             f"total_distance = {self.total_distance};"
         ])
 
@@ -46,15 +53,17 @@ class CVRPSolution(CPSolution):
     def should_minimize(self) -> bool:
         return True
 
-    def destroy(self, action: list[int]) -> CVRPPartialSolution:
+    def destroy(self, action: np.ndarray[int]) -> CVRPPartialSolution:
         fixed_successor = self.successor.copy()
         fixed_vehicle = self.vehicle.copy()
 
         # remove all edges of the selected nodes; 1 subtracted from indices because of the MiniZinc representation
-        for node, next_node in enumerate(fixed_next, start=1):
-            if action[node-1] or action[next_node-1]:
-                fixed_next[node-1] = 0
-        return CVRPPartialSolution(self, fixed_next)
+        for node, next_node in enumerate(fixed_successor, start=1):
+            if node-1 in action or next_node-1 in action:
+                fixed_successor[node-1] = 0
+                fixed_vehicle[node-1] = 0
+
+        return CVRPPartialSolution(self, fixed_successor, fixed_vehicle)
 
 
 class CVRPSolver(CPSolver[CVRPSolution, CVRPPartialSolution]):

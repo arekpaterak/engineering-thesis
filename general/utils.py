@@ -62,5 +62,5 @@ def route_from_circuit(circuit: list[int]):
         next_node = circuit[next_node]
     return route
 
-def minizinc_circuit_to_python(minizinc_circuit: list[int]) -> list[int]:
-    return [n-1 if n != 0 else None for n in minizinc_circuit]
+def minizinc_list_to_python(minizinc_list: list[int]) -> list[int]:
+    return [n-1 if n != 0 else None for n in minizinc_list]

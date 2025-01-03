@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from functools import partial, wraps
-from itertools import combinations, permutations
-from types import MethodType
-from typing import Optional, List, Self, Dict, Tuple
-
-import numpy as np
+from functools import partial
+from itertools import permutations
+from typing import Optional
 
 import gymnasium as gym
+import numpy as np
 import torch
-
 import torch_geometric as pyg
 
 from general.lns_env import LNSEnvironment
-from general.utils import MultiBinaryWithLimitedSampling, draw_graph, route_from_circuit, minizinc_circuit_to_python
+from general.utils import MultiBinaryWithLimitedSampling, draw_graph, route_from_circuit, minizinc_list_to_python
 from problems.tsp.tsp import TravelingSalesmanProblem
 from problems.tsp.tsp_lns import TSPSolver
 
@@ -102,14 +99,14 @@ class TSPEnvironmentMultiBinary(LNSEnvironment):
             "best_objective_value": self.lns.best_solution.objective_value,
             "step_objective_value": self.lns.step_objective_value,
             "partial_solution": {
-                "circuit": minizinc_circuit_to_python(lns_info["partial_solution"].fixed_next)
+                "circuit": minizinc_list_to_python(lns_info["partial_solution"].fixed_next)
             },
         }
 
         return observation, reward, terminated, truncated, info
 
     def _observation(self, solution) -> dict:
-        circuit = minizinc_circuit_to_python(solution.next)
+        circuit = minizinc_list_to_python(solution.next)
 
         result = {
             "problem": {

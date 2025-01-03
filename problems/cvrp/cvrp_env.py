@@ -1,22 +1,18 @@
 from __future__ import annotations
 
-from functools import partial, wraps
-from types import MethodType
-from typing import Optional, List, Self, Dict
+from typing import Optional
 
 import numpy as np
-
-import gymnasium as gym
 import torch
-
 import torch_geometric as pyg
 
 from general.lns_env import LNSEnvironment
-from general.utils import MultiBinaryWithLimitedSampling
+from general.utils import MultiBinaryWithLimitedSampling, minizinc_list_to_python
+from problems.cvrp.cvrp import CVRP
+from problems.cvrp.cvrp_lns import CVRPSolver
 
 
 class CVRPEnvironment(LNSEnvironment):
-    EXPENSIVE_ACTION_PENALTY: int = -1000
 
     def __init__(
         self,
@@ -25,83 +21,139 @@ class CVRPEnvironment(LNSEnvironment):
         repair_model_path: str,
         solver_name: str = "gecode",
         max_episode_length: Optional[int] = None,
-        expensive_action_threshold: Optional[float] = 0.5,
+        processes: int = 1,
+        fully_connected: bool = False,
     ):
         super().__init__(
-            problem_cls=TravelingSalesmanProblem,
-            solver_cls=TSPSolver,
+            problem_cls=CVRP,
+            solver_cls=CVRPSolver,
             problem_instance_path=problem_instance_path,
             init_model_path=init_model_path,
             repair_model_path=repair_model_path,
             solver_name=solver_name,
             max_episode_length=max_episode_length,
+            processes=processes,
         )
 
-        self.expensive_action_threshold = expensive_action_threshold
-
         num_nodes = self.problem.num_nodes
+        self.fully_connected = fully_connected
 
         # ==== Observation Space ====
-        self.observation_space = gym.spaces.Dict({
-            "problem": gym.spaces.Dict({
-                "node_positions": gym.spaces.Box(
-                    low=0,
-                    high=self.problem.config["max_coordinate"],
-                    shape=(num_nodes, 2),
-                    dtype=int
-                )
-            }),
-            "solution": gym.spaces.Dict({
-                "route": gym.spaces.Sequence(gym.spaces.Discrete(num_nodes, start=1))
-            })
-        })
-        # Override sampling with a mask for a fixed Sequence length
-        self.observation_space.sample = partial(self.observation_space.sample, mask={"problem": None, "solution" : {"route": (num_nodes, None)}})
+        # self.observation_space = gym.spaces.Dict({
+        #     "problem": gym.spaces.Dict({
+        #         "node_positions": gym.spaces.Box(
+        #             low=0,
+        #             high=1000,
+        #             shape=(num_nodes, 2),
+        #             dtype=int
+        #         ),
+        #         "demands": None,
+        #         "capacity": None
+        #     }),
+        #     "solution": gym.spaces.Dict({
+        #         "routes": None,
+        #         "successor": None,
+        #         "vehicle": None
+        #     })
+        # })
 
         # ==== Action Space ====
-        # self.action_space = gym.spaces.MultiBinary(num_nodes)
         self.action_space = MultiBinaryWithLimitedSampling(num_nodes)
 
-        # Extend sampling with possibility to sample 1s on exactly n random positions
-        # def add_new_arg_wrapper(method):
-        #     @wraps(method)
-        #     def wrapper(self, n=None):
-        #         if n:
-        #             size = self.shape[0]
-        #             action = np.zeros(size, dtype="int")
-        #             choices = np.random.choice(size, size=n, replace=False)
-        #             action[choices] = 1
-        #             return action
-        #         else:
-        #             return method(self)
-        #     return wrapper
-        # self.action_space.sample = MethodType(
-        #     add_new_arg_wrapper(gym.spaces.MultiBinary.sample),
-        #     self.action_space
-        # )
+        self.action_counter = np.array([0.0 for _ in range(num_nodes)])
+
+    def reset(self):
+        self.action_counter = np.array([0.0 for _ in range(self.problem.num_nodes)])
+
+        observation, info = super().reset()
+        return observation, info
+
+    def step(self, action: np.ndarray):
+        """
+        Args:
+            action
+
+        Returns:
+            observation
+            reward
+            terminated (bool)
+            truncated (bool)
+            info (dict)
+        """
+        solution, score, terminated, truncated, lns_info = self.lns.step(action)
+
+        if score != 0:
+            self.action_counter *= 0
+        self.action_counter[action] += 1
+
+        self.episode_length += 1
+        if self.max_episode_length:
+            if self.episode_length >= self.max_episode_length:
+                truncated = True
+
+        observation = self._observation(solution)
+        reward = self._reward(score, action)
+
+        info = {
+            "best_objective_value": self.lns.best_solution.objective_value,
+            "step_objective_value": self.lns.step_objective_value,
+            "partial_solution": {
+                "successor": lns_info["partial_solution"].fixed_successor,
+                "vehicle": lns_info["partial_solution"].fixed_vehicle,
+            },
+        }
+
+        return observation, reward, terminated, truncated, info
 
     def _observation(self, solution) -> dict:
+        successor = solution.successor
+        routes = []
+
+        N = self.problem.num_nodes
+        for vehicle in range(N):
+            route = [0]
+            next_node = successor[N+vehicle]
+            end_node = successor[N*2+vehicle]
+
+            while next_node != end_node:
+                route.append(next_node)
+                next_node = successor[next_node-1]
+
+            if len(route) > 2:
+                routes.append(route)
+
         result = {
             "problem": {
                 "node_positions": [{"x": position.x, "y": position.y} for position in self.problem.node_positions],
+                "demands": self.problem.demands,
+                "capacity": self.problem.capacity,
             },
             "solution": {
-                "route": solution.next,
+                "routes": routes,
+                "successor": solution.successor,
+                "vehicle": minizinc_list_to_python(solution.vehicle)[:],
             },
+            "how_many_times_node_chosen": self.action_counter.tolist()
         }
         return result
 
     def _reward(self, score, action):
-        if self.is_action_desired(action):
-            return score + self.EXPENSIVE_ACTION_PENALTY
-        else:
-            return score
+        return score
 
     @staticmethod
-    def preprocess(observation: dict) -> pyg.data.Data:
+    def preprocess(observation: dict, fully_connected: bool = False) -> pyg.data.Data:
         node_positions = observation['problem']['node_positions']
-        node_features = torch.tensor([[node['x'], node['y']] for node in node_positions], dtype=torch.float)
-        node_positions = node_features.clone()
+        how_many_times_node_chosen = observation['how_many_times_node_chosen']
+        demands = observation["problem"]["demands"]
+        node_features = torch.tensor(
+            [
+                [node['x'] / 1000, node['y'] / 1000, times, demand / sum(demands)] for node, times, demand in
+                zip(node_positions, how_many_times_node_chosen, demands)
+            ], dtype=torch.float
+        )
+        pos = node_features.clone()
+
+        return
 
         route = observation['solution']['route']
         edges = []
@@ -122,13 +174,28 @@ class CVRPEnvironment(LNSEnvironment):
 
         return pyg.data.Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, pos=node_positions)
 
-    def is_action_desired(self, action: list[int]) -> bool:
-        if self.expensive_action_threshold is None:
-            return False
-
-        proportion = sum(action) / len(action)
-        return proportion > self.expensive_action_threshold
-
 
 if __name__ == "__main__":
-    pass
+    problem_path = "data/generated/train/XMLike20/XML20_1113_00.json"
+    init_model_path = "minizinc/cvrp_init.mzn"
+    repair_model_path = "minizinc/cvrp_repair.mzn"
+    solver_name = "gecode"
+
+    env = CVRPEnvironment(problem_path, init_model_path, repair_model_path, solver_name)
+    print(env.problem)
+
+    print("==== Observation Space ====")
+
+    print("==== Action Space ====")
+    print(env.action_space)
+
+    obs, info = env.reset()
+    print(f"\nObservation:\n{obs}")
+    print(f"\nInfo:\n{info}")
+
+    action = np.where(env.action_space.sample_limited(k=4) == 1.0)[0]
+    print(f"A restricted sample action: {action}")
+    obs, _, _, _, info = env.step(action)
+    print(f"\nObservation:\n{obs}")
+    print(f"Routes:")
+    print("\n".join([str(route) for route in obs["solution"]["routes"]]))
