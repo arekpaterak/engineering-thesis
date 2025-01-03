@@ -7,7 +7,7 @@ import torch
 import torch_geometric as pyg
 
 from general.lns_env import LNSEnvironment
-from general.utils import MultiBinaryWithLimitedSampling, minizinc_list_to_python
+from general.utils import MultiBinaryWithLimitedSampling, minizinc_list_to_python, draw_graph
 from problems.cvrp.cvrp import CVRP
 from problems.cvrp.cvrp_lns import CVRPSolver
 
@@ -115,7 +115,7 @@ class CVRPEnvironment(LNSEnvironment):
             next_node = successor[N+vehicle]
             end_node = successor[N*2+vehicle]
 
-            while next_node != end_node:
+            while next_node <= N:
                 route.append(next_node)
                 next_node = successor[next_node-1]
 
@@ -153,20 +153,19 @@ class CVRPEnvironment(LNSEnvironment):
         )
         pos = node_features.clone()
 
-        return
-
-        route = observation['solution']['route']
+        routes = observation['solution']['routes']
         edges = []
-        for i in range(len(route) - 1):
-            src = route[i] - 1
-            dst = route[i + 1] - 1
+        for route in routes:
+            for i in range(len(route) - 1):
+                src = route[i]
+                dst = route[i + 1]
+                edges.append((src, dst))
+                edges.append((dst, src))
+
+            src = route[-1]
+            dst = route[0]
             edges.append((src, dst))
             edges.append((dst, src))
-
-        src = route[-1] - 1
-        dst = route[0] - 1
-        edges.append((src, dst))
-        edges.append((dst, src))
 
         edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
 
@@ -199,3 +198,7 @@ if __name__ == "__main__":
     print(f"\nObservation:\n{obs}")
     print(f"Routes:")
     print("\n".join([str(route) for route in obs["solution"]["routes"]]))
+
+    graph = env.preprocess(obs)
+    plt = draw_graph(graph)
+    plt.show()
