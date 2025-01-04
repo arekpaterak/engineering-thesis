@@ -1,5 +1,4 @@
 import json
-import os
 import random
 import sqlite3
 import time
@@ -7,15 +6,13 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-import pandas as pd
 import torch
 import tyro
 import wandb
 
-from experiments.tsp.train.reinforce_multibinary import Policy
-from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
-
 from config import *
+from experiments.cvrp.train.reinforce import CVRPPolicy
+from problems.cvrp.cvrp_env import CVRPEnvironment
 
 
 @dataclass
@@ -56,22 +53,21 @@ class Args:
 if __name__ == '__main__':
     args = tyro.cli(Args)
 
-    TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", args.instances_dir_name)
-
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     if args.debug:
         print(f"Device: {device}")
 
-    if args.instance_name:
-        problem_instances_paths = [os.path.join(TSP_DATA_DIR, f"{args.instance_name}.json")]
+    data_dir = os.path.join(CVRP_DATA_DIR, args.instances_dir_name)
+    if args.instance_name is None:
+        problem_instances_paths = [os.path.join(CVRP_DATA_DIR, path) for path in os.listdir(CVRP_DATA_DIR) if path.endswith(".json")]
     else:
-        problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
+        problem_instances_paths = [os.path.join(CVRP_DATA_DIR, f"{args.instance_name}.json")]
 
     # ==== Loading the model ====
     if args.model_name:
         model_name = args.model_name
     else:
-        model_name = f"model__k_{args.k}"
+        model_name = f"cvrp_model__k_{args.k}"
 
     wandb_api = wandb.Api()
     artifact = wandb_api.artifact(f"{args.wandb_project_name}/{model_name}:{args.model_tag}")
@@ -83,7 +79,7 @@ if __name__ == '__main__':
     with open(model_hparams_path, "r") as f:
         model_hparams = json.load(f)
 
-    model = Policy(
+    model = CVRPPolicy(
         features_extractor_kwargs=model_hparams,
     )
     model.load_state_dict(torch.load(model_path, weights_only=True))
@@ -107,10 +103,10 @@ if __name__ == '__main__':
                 print(f"Instance {instance_idx}: {instance_name}")
 
             # ==== Environment Creation ====
-            env = TSPEnvironmentMultiBinary(
+            env = CVRPEnvironment(
                 problem_instance_path=instance_path,
-                init_model_path=TSP_INIT_SOLVER_PATH,
-                repair_model_path=TSP_REPAIR_SOLVER_PATH,
+                init_model_path=CVRP_INIT_SOLVER_PATH,
+                repair_model_path=CVRP_REPAIR_SOLVER_PATH,
                 solver_name=args.solver,
                 max_episode_length=args.max_t,
             )
@@ -140,7 +136,7 @@ if __name__ == '__main__':
                 # ==== Logging ====
                 if args.debug:
                     print(f"Step {step}")
-                    print(f"Reward: {reward}, Step objective value: {info['step_objective_value']}, k: {k}")
+                    print(f"Action: {action}, Reward: {reward}, Step objective value: {info['step_objective_value']}")
 
                 step += 1
 
@@ -166,7 +162,7 @@ if __name__ == '__main__':
                     cursor = conn.cursor()
                     cursor.execute(
                         """
-                            SELECT * FROM tsp_best_results
+                            SELECT * FROM cvrp_best_results
                             WHERE instance = ? AND subset = ? AND method = ? AND seed = ? AND steps = ?
                         """, (
                         new_record["instance"], new_record["subset"], new_record["method"], new_record["seed"],
@@ -179,7 +175,7 @@ if __name__ == '__main__':
                         # If the record exists, update it
                         cursor.execute(
                             """
-                                UPDATE tsp_best_results
+                                UPDATE cvrp_best_results
                                 SET objective_value = ?, time = ?, avg_time_per_step = ?
                                 WHERE instance = ? AND subset = ? AND method = ? AND seed = ? AND steps = ?
                             """, (
@@ -197,7 +193,7 @@ if __name__ == '__main__':
                         # If the record doesn't exist, insert a new record
                         cursor.execute(
                             """
-                                INSERT INTO tsp_best_results (instance, subset, method, seed, steps, initial_objective_value, objective_value, time, avg_time_per_step)
+                                INSERT INTO cvrp_best_results (instance, subset, method, seed, steps, initial_objective_value, objective_value, time, avg_time_per_step)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 new_record["instance"],

@@ -11,7 +11,7 @@ cursor = conn.cursor()
 
 # Define the SQL command to create the table
 create_table_query = """
-CREATE TABLE IF NOT EXISTS best_results (
+CREATE TABLE IF NOT EXISTS tsp_best_results (
     instance TEXT,
     subset TEXT,
     method TEXT,

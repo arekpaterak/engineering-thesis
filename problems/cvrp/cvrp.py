@@ -71,7 +71,7 @@ class CVRP(Problem):
         capacity = int(header_data['CAPACITY'])
 
         # Compute distance matrix
-        distance_matrix = np.zeros((num_nodes, num_nodes))
+        distance_matrix = np.zeros((num_nodes+1, num_nodes+1))
         for idx1, position1 in enumerate(node_positions):
             for idx2, position2 in enumerate(node_positions):
                 distance_matrix[idx1, idx2] = position1.distanceTo(position2)

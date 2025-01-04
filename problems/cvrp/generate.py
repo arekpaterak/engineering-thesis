@@ -14,7 +14,7 @@ class Args:
     num_nodes: int
     depot_positioning: int = 1
     customer_positioning: int = 1
-    demand_distribution: int = 1
+    demand_distribution: int = 2
     average_route_size: int = 3
     dir: str = "generated"
     starting_n: int = 0

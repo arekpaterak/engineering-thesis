@@ -33,7 +33,7 @@ def draw_tsp_graph(
         node_size=500,
         edge_color="black",
         font_size=10,
-        width=1.2
+        width=2
     )
     return plt
 

@@ -14,7 +14,6 @@ from problems.cvrp.cvrp_lns import CVRPSolver
 
 
 class CVRPEnvironment(LNSEnvironment):
-
     def __init__(
         self,
         problem_instance_path: str,
@@ -154,10 +153,6 @@ class CVRPEnvironment(LNSEnvironment):
         )
         pos = node_features.clone()
 
-        print(len(node_positions))
-        print(len(how_many_times_node_chosen))
-        print(len(demands))
-
         routes = observation['solution']['routes']
         edges = []
         edge_attr = []
@@ -206,13 +201,16 @@ if __name__ == "__main__":
     plt = draw_cvrp_graph(graph)
     plt.show()
 
-    action = np.where(env.action_space.sample_limited(k=4) == 1.0)[0]
+    for _ in range(1):
+        action = np.where(env.action_space.sample_limited(k=4) == 1.0)[0]
+        obs, _, _, _, info = env.step(action)
+
     print(f"A restricted sample action: {action}")
-    obs, _, _, _, info = env.step(action)
+
     print(f"\nObservation:\n{obs}")
     print(f"Routes:")
     print("\n".join([str(route) for route in obs["solution"]["routes"]]))
 
     graph = env.preprocess(obs)
-    plt = draw_cvrp_graph(graph)
+    plt = draw_cvrp_graph(graph, with_labels=False)
     plt.show()

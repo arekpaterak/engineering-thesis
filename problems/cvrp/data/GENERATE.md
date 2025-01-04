@@ -1,3 +1,3 @@
 ```
-python -m problems.cvrp.generate --n 1 --num-nodes 20 --dir generated/train/XMLike20
+python -m problems.cvrp.generate --n 10 --num-nodes 20 --dir generated/train --starting-n 10
 ```

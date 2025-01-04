@@ -3,10 +3,9 @@ import os
 import random
 import time
 from collections import deque
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
-from functools import partial, partialmethod
+from functools import partialmethod
 from typing import Tuple, Optional
 
 import numpy as np
@@ -17,10 +16,9 @@ import torchmetrics
 import tyro
 import wandb
 from torch import nn
-from torch.nn.functional import dropout
 
 from general.ml.graph_features_extractor import GraphFeaturesExtractor
-from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
+from problems.cvrp.cvrp_env import CVRPEnvironment
 
 from config import *
 
@@ -79,8 +77,6 @@ class Args:
     """the number of epochs"""
     entropy_coefficient: float = 0.01
     """the entropy coefficient for the entropy regularization"""
-    # proportion: float = 0.2
-    # """the proportion of the nodes in the problem to destroy in one step"""
     k: int = 4
     """the number of the nodes to destroy in one step"""
     max_grad_norm: Optional[float] = None
@@ -88,7 +84,7 @@ class Args:
     normalize_returns: bool = True
 
 
-class Policy(nn.Module):
+class CVRPPolicy(nn.Module):
     def __init__(
         self,
         features_extractor_kwargs: dict,
@@ -116,16 +112,13 @@ class Policy(nn.Module):
 
         return torch.flatten(features)
 
-    def get_action(self, graph_data: pyg.data.Data, k: int, greedy: bool = False, gumbel_topk: bool = True) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def get_action(self, graph_data: pyg.data.Data, k: int, greedy: bool = False, gumbel_topk: bool = False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x, edge_index, edge_attr = graph_data.x, graph_data.edge_index, graph_data.edge_attr
 
         logits = self.forward(x, edge_index, edge_attr)
-        # print(logits)
 
-        prob = F.softmax(logits, dim=-1)
-        log_prob = F.log_softmax(logits, dim=-1)
-
-        # print(prob)
+        prob = F.softmax(logits, dim=-1)[1:]  # Ignoring the depot node
+        log_prob = F.log_softmax(logits, dim=-1)[1:]
 
         entropy = -(log_prob * prob).sum(-1, keepdim=True)
 
@@ -140,11 +133,7 @@ class Policy(nn.Module):
 
         action_log_prob = log_prob.gather(-1, action_idx)
 
-        action = torch.zeros(logits.shape[0])
-        action[action_idx] = 1
-
-        return action.detach(), action_log_prob.sum(-1, keepdim=True), entropy
-        # return action.detach(), action_log_prob, entropy
+        return action_idx.detach(), action_log_prob.sum(-1, keepdim=True), entropy
 
     get_greedy_action = partialmethod(get_action, greedy=True)
 
@@ -152,11 +141,13 @@ class Policy(nn.Module):
 if __name__ == "__main__":
     args = tyro.cli(Args)
 
-    TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", "generated", "train")
+    TRAIN_DATA_DIR = os.path.join(CVRP_DATA_DIR, "generated/train")
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     if args.debug:
         print(f"Device: {device}")
+
+    torch.autograd.set_detect_anomaly(True)
 
     # ==== Seeding ====
     random.seed(args.seed)
@@ -165,21 +156,21 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     # ==== Environments Creation ====
-    problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
+    problem_instances_paths = [os.path.join(TRAIN_DATA_DIR, path) for path in os.listdir(TRAIN_DATA_DIR) if path.endswith(".json")]
 
     # Filter instances
     training_instances_paths = []
     match args.instances:
         case int():
             for path in problem_instances_paths:
-                size, _, idx = os.path.basename(path).rstrip(".json").strip().split("_")
+                size, _, idx = os.path.basename(path).lstrip("XML").rstrip(".json").strip().split("_")
                 size, idx = int(size), int(idx)
                 if size in args.problem_sizes and idx == args.instances:
                     training_instances_paths.append(path)
         case _:
             index_range = range(args.instances[0], args.instances[1]+1)
             for path in problem_instances_paths:
-                size, _, idx = os.path.basename(path).rstrip(".json").strip().split("_")
+                size, _, idx = os.path.basename(path).lstrip("XML").rstrip(".json").strip().split("_")
                 size, idx = int(size), int(idx)
                 if size in args.problem_sizes and idx in index_range:
                     training_instances_paths.append(path)
@@ -187,10 +178,10 @@ if __name__ == "__main__":
     if args.debug:
         print("Training instances:", training_instances_paths)
 
-    envs = TSPEnvironmentMultiBinary.create_multiple(
+    envs = CVRPEnvironment.create_multiple(
         training_instances_paths,
-        init_model_path=TSP_INIT_SOLVER_PATH,
-        repair_model_path=TSP_REPAIR_SOLVER_PATH,
+        init_model_path=CVRP_INIT_SOLVER_PATH,
+        repair_model_path=CVRP_REPAIR_SOLVER_PATH,
         solver_name=args.solver,
         max_episode_length=args.max_t,
         processes=args.processes,
@@ -199,7 +190,7 @@ if __name__ == "__main__":
 
     # ==== Model Creation ====
     model_hparams = dict(
-        in_channels=3,
+        in_channels=4,
         num_heads=args.num_heads,
         edge_dim=1,
         num_layers=args.num_layers,
@@ -208,13 +199,13 @@ if __name__ == "__main__":
         out_channels=args.out_channels,
         dropout=args.dropout,
     )
-    model = Policy(
+    model = CVRPPolicy(
         features_extractor_kwargs=model_hparams,
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
     # ==== Tracking Initialization ====
-    run_name = f"TSP{args.problem_sizes}x{len(envs)}__{args.exp_name}__{args.seed}__{datetime.now().strftime('%Y%m%d_%H%M')}"
+    run_name = f"CVRP{args.problem_sizes}x{len(envs)}__{args.exp_name}__{args.seed}__{datetime.now().strftime('%Y%m%d_%H%M')}"
     print(run_name)
     if args.track:
         wandb.init(
@@ -223,30 +214,7 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             config={
-                "k": args.k,
-                "env": {
-                    "n_instances": len(envs),
-                    "init_solver": TSP_INIT_SOLVER_PATH,
-                    "repair_solver": TSP_REPAIR_SOLVER_PATH,
-                    "max_t": args.max_t,
-                    "instances": args.instances,
-                    "solver": args.solver,
-                    "training_instances_paths": training_instances_paths,
-                },
-                "neural_network": {
-                    "num_layers": args.num_layers,
-                    "num_heads": args.num_heads,
-                    "hidden_channels": args.hidden_channels,
-                    "out_channels": args.out_channels,
-                    "v2": args.gat_v2,
-                },
-                "learning": {
-                    "learning_rate": args.learning_rate,
-                    "gamma": args.gamma,
-                    "n_epochs": args.n_epochs,
-                    "entropy_coefficient": args.entropy_coefficient,
-                    "max_grad_norm": args.max_grad_norm,
-                }
+                name: value for name, value in vars(args).items()
             },
             job_type="train",
             group=str(args.max_t),
@@ -277,6 +245,9 @@ if __name__ == "__main__":
 
             # ==== One Trajectory Acquisition ====
             observation, info = env.reset()
+            if args.debug:
+                print(f"Initial objective value: {info['best_objective_value']}")
+
             for t in range(args.max_t):
                 graph_data = env.preprocess(observation, args.fully_connected).to(device)
                 action, log_prob, entropy = model.get_action(graph_data, k=args.k, gumbel_topk=args.gumbel_topk)
@@ -291,7 +262,7 @@ if __name__ == "__main__":
                 if args.debug and env_idx == args.representative_instance_idx:
                     log_prob = log_prob.detach().cpu().sum()
                     prob = torch.exp(log_prob).item()
-                    print(f"Step {t:3}, Action: {action}, Log(Prob): {log_prob.item():.4f}, Prob: {prob:.4f}, Entropy: {entropy.item():.4f}, Reward: {reward:.4f}, Step objective value: {info['step_objective_value']}, k: {int(sum(action))}")
+                    print(f"Step {t:3}, Action: {action}, Log(Prob): {log_prob.item():.4f}, Prob: {prob:.4f}, Entropy: {entropy.item():.4f}, Reward: {reward:.4f}, Step objective value: {info['step_objective_value']}")
 
                 if terminated or truncated:
                     break
@@ -365,7 +336,7 @@ if __name__ == "__main__":
             with open(model_hparams_path, "w") as f:
                 json.dump(model_hparams, f, indent=4)
 
-            artifact = wandb.Artifact(f"model__k_{args.k}", type="model")
+            artifact = wandb.Artifact(f"cvrp_model__k_{args.k}", type="model")
             artifact.add_file(model_path)
             artifact.add_file(model_hparams_path)
             wandb.log_artifact(artifact)
