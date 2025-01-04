@@ -5,9 +5,10 @@ from typing import Optional
 import numpy as np
 import torch
 import torch_geometric as pyg
+from matplotlib.colors import ListedColormap
 
 from general.lns_env import LNSEnvironment
-from general.utils import MultiBinaryWithLimitedSampling, minizinc_list_to_python, draw_graph
+from general.utils import MultiBinaryWithLimitedSampling, minizinc_list_to_python, draw_tsp_graph, draw_cvrp_graph
 from problems.cvrp.cvrp import CVRP
 from problems.cvrp.cvrp_lns import CVRPSolver
 
@@ -143,8 +144,8 @@ class CVRPEnvironment(LNSEnvironment):
     @staticmethod
     def preprocess(observation: dict, fully_connected: bool = False) -> pyg.data.Data:
         node_positions = observation['problem']['node_positions']
-        how_many_times_node_chosen = observation['how_many_times_node_chosen']
-        demands = observation["problem"]["demands"]
+        how_many_times_node_chosen = [0] + observation['how_many_times_node_chosen']
+        demands = [0] + observation["problem"]["demands"]
         node_features = torch.tensor(
             [
                 [node['x'] / 1000, node['y'] / 1000, times, demand / sum(demands)] for node, times, demand in
@@ -153,25 +154,34 @@ class CVRPEnvironment(LNSEnvironment):
         )
         pos = node_features.clone()
 
+        print(len(node_positions))
+        print(len(how_many_times_node_chosen))
+        print(len(demands))
+
         routes = observation['solution']['routes']
         edges = []
-        for route in routes:
+        edge_attr = []
+        for vehicle_idx, route in enumerate(routes):
             for i in range(len(route) - 1):
                 src = route[i]
                 dst = route[i + 1]
                 edges.append((src, dst))
                 edges.append((dst, src))
+                edge_attr.append(vehicle_idx)
+                edge_attr.append(vehicle_idx)
 
             src = route[-1]
             dst = route[0]
             edges.append((src, dst))
             edges.append((dst, src))
+            edge_attr.append(vehicle_idx)
+            edge_attr.append(vehicle_idx)
 
         edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
 
-        edge_attr = torch.tensor([[1] for _ in edges], dtype=torch.float)
+        edge_attr = torch.tensor(edge_attr, dtype=torch.float)
 
-        return pyg.data.Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, pos=node_positions)
+        return pyg.data.Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, pos=pos)
 
 
 if __name__ == "__main__":
@@ -192,6 +202,10 @@ if __name__ == "__main__":
     print(f"\nObservation:\n{obs}")
     print(f"\nInfo:\n{info}")
 
+    graph = env.preprocess(obs)
+    plt = draw_cvrp_graph(graph)
+    plt.show()
+
     action = np.where(env.action_space.sample_limited(k=4) == 1.0)[0]
     print(f"A restricted sample action: {action}")
     obs, _, _, _, info = env.step(action)
@@ -200,5 +214,5 @@ if __name__ == "__main__":
     print("\n".join([str(route) for route in obs["solution"]["routes"]]))
 
     graph = env.preprocess(obs)
-    plt = draw_graph(graph)
+    plt = draw_cvrp_graph(graph)
     plt.show()

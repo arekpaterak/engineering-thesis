@@ -10,7 +10,7 @@ import torch
 import torch_geometric as pyg
 
 from general.lns_env import LNSEnvironment
-from general.utils import MultiBinaryWithLimitedSampling, draw_graph, route_from_circuit, minizinc_list_to_python
+from general.utils import MultiBinaryWithLimitedSampling, draw_tsp_graph, route_from_circuit, minizinc_list_to_python
 from problems.tsp.tsp import TravelingSalesmanProblem
 from problems.tsp.tsp_lns import TSPSolver
 
@@ -183,7 +183,7 @@ if __name__ == "__main__":
     print(f"Route:\n{obs['solution']['route']}")
     print(f"Circuit:\n{obs['solution']['circuit']}\n")
     graph = env.preprocess(obs)
-    plt = draw_graph(graph)
+    plt = draw_tsp_graph(graph)
     plt.show()
 
     action = env.action_space.sample_limited(k=4)
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     print(f"Circuit:\n{obs['solution']['circuit']}")
     print(f"Info:\n{info}")
     graph = env.preprocess(obs)
-    plt = draw_graph(graph)
+    plt = draw_tsp_graph(graph)
     plt.show()
 
     obs, _, _, _, info = env.step(action )
