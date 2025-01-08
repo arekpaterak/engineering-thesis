@@ -17,8 +17,8 @@ from problems.cvrp.cvrp_env import CVRPEnvironment
 
 @dataclass
 class Args:
-    instance_name: Optional[str] = None
-    """the instance on which the method will be run"""
+    instances: list[str]
+    """the instances on which the method will be run"""
     instances_dir_name: str = "generated/train"
     """the name of instances directory"""
     seed: int = 1
@@ -33,7 +33,7 @@ class Args:
     """if toggled, cuda will be enabled by default"""
     debug: bool = True
     """if toggled, extra logs will be printed to the console"""
-    log_every_n_step: int = 10
+    log_every_n_step: int = 1
     """the logging interval"""
     model_name: Optional[str] = None
     """the name of the model"""
@@ -48,6 +48,8 @@ class Args:
 
     # Algorithm specific arguments
     k: int = 4
+    greedy: bool = False
+    gumbel_topk: bool = False
 
 
 if __name__ == '__main__':
@@ -58,10 +60,9 @@ if __name__ == '__main__':
         print(f"Device: {device}")
 
     data_dir = os.path.join(CVRP_DATA_DIR, args.instances_dir_name)
-    if args.instance_name is None:
-        problem_instances_paths = [os.path.join(CVRP_DATA_DIR, path) for path in os.listdir(CVRP_DATA_DIR) if path.endswith(".json")]
-    else:
-        problem_instances_paths = [os.path.join(CVRP_DATA_DIR, f"{args.instance_name}.json")]
+    problem_instances_paths = [os.path.join(data_dir, f"{instance}.json") for instance in args.instances]
+
+    print(problem_instances_paths)
 
     # ==== Loading the model ====
     if args.model_name:
@@ -99,8 +100,7 @@ if __name__ == '__main__':
 
             instance_name = os.path.basename(instance_path).rstrip(".json")
 
-            if args.debug:
-                print(f"Instance {instance_idx}: {instance_name}")
+            print(f"Instance {instance_idx}: {instance_name}")
 
             # ==== Environment Creation ====
             env = CVRPEnvironment(
@@ -127,7 +127,7 @@ if __name__ == '__main__':
 
                 graph_data = env.preprocess(observation).to(device)
 
-                action, log_prob, entropy = model.get_action(graph_data, k=k)
+                action, log_prob, entropy = model.get_action(graph_data, k=k, greedy=args.greedy, gumbel_topk=args.gumbel_topk)
                 action = action.cpu().numpy()
                 observation, reward, terminated, truncated, info = env.step(action)
 
@@ -142,7 +142,7 @@ if __name__ == '__main__':
 
                 # ==== Save to the best results ====
                 if step % args.log_every_n_step == 0 or step < 10:
-                    method_name = f"model({args.k}):{args.model_tag}"
+                    method_name = f"{'greedy_' if args.greedy else ''}model({args.k}):{args.model_tag}"
 
                     new_record = {
                         "instance": instance_name,
@@ -213,7 +213,6 @@ if __name__ == '__main__':
                     conn.close()
 
                     if args.debug:
-                        print(f"Solution: {env.lns.best_solution.next}")
                         print(f"Objective value: {info['best_objective_value']}")
                         print(f"Measured time: {episode_time:.3f} s")
                         print(f"Average time per one step: {(episode_time / step):.3f} s")

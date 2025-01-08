@@ -72,7 +72,7 @@ class Args:
     learning_rate: float = 1e-3
     """the learning rate of the optimizer"""
     gamma: float = 0.99
-    """the discount factor gamma"""
+    """the discount factor (gamma)"""
     n_epochs: int = 1
     """the number of epochs"""
     entropy_coefficient: float = 0.01
@@ -117,8 +117,8 @@ class CVRPPolicy(nn.Module):
 
         logits = self.forward(x, edge_index, edge_attr)
 
-        prob = F.softmax(logits, dim=-1)[1:]  # Ignoring the depot node
-        log_prob = F.log_softmax(logits, dim=-1)[1:]
+        prob = F.softmax(logits[1:], dim=-1)  # Ignoring the depot node
+        log_prob = F.log_softmax(logits[1:], dim=-1)
 
         entropy = -(log_prob * prob).sum(-1, keepdim=True)
 
@@ -185,7 +185,6 @@ if __name__ == "__main__":
         solver_name=args.solver,
         max_episode_length=args.max_t,
         processes=args.processes,
-        fully_connected=args.fully_connected
     )
 
     # ==== Model Creation ====
@@ -286,7 +285,7 @@ if __name__ == "__main__":
             for log_prob, discounted_return in zip(log_probs, returns):
                 policy_loss.append(-log_prob * discounted_return)
 
-            policy_loss = torch.cat(policy_loss).mean()
+            policy_loss = torch.cat(policy_loss).sum()
             # As the regularization, the entropy should be maximized (which equals minimizing its negative)
             entropy = torch.cat(entropies).mean()
             total_loss = policy_loss - args.entropy_coefficient * entropy

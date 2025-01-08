@@ -23,11 +23,12 @@ class GraphFeaturesExtractor(nn.Module):
         v2: bool = False,
         activation: Callable = F.relu,
         dropout: float = 0.0,
+        residual: bool = False,
     ) -> None:
         super().__init__()
 
         conv = GATConv if not v2 else GATv2Conv
-        conv = partial(conv, edge_dim=edge_dim)
+        conv = partial(conv, edge_dim=edge_dim, residual=residual)
 
         self.convs = nn.ModuleList([
             conv(in_channels, hidden_channels, heads=num_heads, concat=True)
@@ -67,5 +68,5 @@ if __name__ == "__main__":
 
     graph_data = TSPEnvironmentMultiBinary.preprocess(obs)
 
-    net = GraphFeaturesExtractor(in_channels=2, num_heads=8, edge_dim=1, num_layers=5)
+    net = GraphFeaturesExtractor(in_channels=3, num_heads=8, edge_dim=1, num_layers=3)
     print(pyg.nn.summary(net, graph_data.x, graph_data.edge_index, graph_data.edge_attr))

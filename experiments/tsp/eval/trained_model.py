@@ -20,8 +20,8 @@ from config import *
 
 @dataclass
 class Args:
-    instance_name: Optional[str] = None
-    """the instance on which the method will be run"""
+    instances: list[str]
+    """the instances on which the method will be run"""
     instances_dir_name: str = "generated/train"
     """the name of instances directory"""
     seed: int = 1
@@ -36,7 +36,7 @@ class Args:
     """if toggled, cuda will be enabled by default"""
     debug: bool = True
     """if toggled, extra logs will be printed to the console"""
-    log_every_n_step: int = 10
+    log_every_n_step: int = 1
     """the logging interval"""
     model_name: Optional[str] = None
     """the name of the model"""
@@ -51,6 +51,8 @@ class Args:
 
     # Algorithm specific arguments
     k: int = 4
+    greedy: bool = False
+    gumbel_topk: bool = False
 
 
 if __name__ == '__main__':
@@ -62,10 +64,7 @@ if __name__ == '__main__':
     if args.debug:
         print(f"Device: {device}")
 
-    if args.instance_name:
-        problem_instances_paths = [os.path.join(TSP_DATA_DIR, f"{args.instance_name}.json")]
-    else:
-        problem_instances_paths = [os.path.join(TSP_DATA_DIR, path) for path in os.listdir(TSP_DATA_DIR) if path.endswith(".json")]
+    problem_instances_paths = [os.path.join(TSP_DATA_DIR, f"{instance}.json") for instance in args.instances]
 
     # ==== Loading the model ====
     if args.model_name:
@@ -131,7 +130,7 @@ if __name__ == '__main__':
 
                 graph_data = env.preprocess(observation).to(device)
 
-                action, log_prob, entropy = model.get_action(graph_data, k=k)
+                action, log_prob, entropy = model.get_action(graph_data, k=k, greedy=args.greedy, gumbel_topk=args.gumbel_topk)
                 action = action.cpu().numpy()
                 observation, reward, terminated, truncated, info = env.step(action)
 
@@ -146,7 +145,7 @@ if __name__ == '__main__':
 
                 # ==== Save to the best results ====
                 if step % args.log_every_n_step == 0 or step < 10:
-                    method_name = f"model({args.k}):{args.model_tag}"
+                    method_name = f"{'greedy_' if args.greedy else ''}model({args.k}):{args.model_tag}"
 
                     new_record = {
                         "instance": instance_name,

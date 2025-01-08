@@ -29,6 +29,7 @@ if __name__ == '__main__':
 
     for instance_n in range(args.n):
         # instance_n is used as a seed
+        instance_n = instance_n + args.starting_n
         subprocess.run(f"python {os.path.join(BASE_DIR, 'data', 'XML100/generator.py')} {args.num_nodes} {args.depot_positioning} {args.customer_positioning} {args.demand_distribution} {args.average_route_size} {instance_n} {instance_n} {dir}")
 
         vrp_filepath = os.path.join(dir, f"XML{args.num_nodes}_{args.depot_positioning}{args.customer_positioning}{args.demand_distribution}{args.average_route_size}_{instance_n:02d}.vrp")

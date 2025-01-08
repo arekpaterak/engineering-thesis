@@ -21,7 +21,7 @@ class Args:
     """seed of the experiment"""
     debug: bool = True
     """if toggled, extra logs will be printed to the console"""
-    log_every_n_step: int = 10
+    log_every_n_step: int = 1
     """the logging interval"""
 
     # Environment specific arguments
