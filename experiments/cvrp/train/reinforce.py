@@ -77,7 +77,7 @@ class Args:
     """the number of epochs"""
     entropy_coefficient: float = 0.01
     """the entropy coefficient for the entropy regularization"""
-    k: int = 4
+    k: int = 5
     """the number of the nodes to destroy in one step"""
     max_grad_norm: Optional[float] = None
     """the maximum norm for gradient clipping"""

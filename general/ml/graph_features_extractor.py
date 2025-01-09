@@ -8,6 +8,8 @@ from torch import nn
 import torch_geometric as pyg
 from torch_geometric.nn import GATConv, GATv2Conv, Linear, Sequential
 
+from config import *
+from problems.cvrp.cvrp_env import CVRPEnvironment
 from problems.tsp.tsp_env_multibinary import TSPEnvironmentMultiBinary
 
 
@@ -53,20 +55,15 @@ class GraphFeaturesExtractor(nn.Module):
 if __name__ == "__main__":
     import os
 
-    BASE_PATH = "D:\\Coding\\University\\S7\\engineering-thesis"
+    # problem_path = os.path.join(TSP_DATA_DIR, "generated", "train", "50_1000_0.json")
+    # env = TSPEnvironmentMultiBinary(problem_path, TSP_INIT_SOLVER_PATH, TSP_REPAIR_SOLVER_PATH)
 
-    TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", "generated", "train")
-    problem_path = os.path.join(TSP_DATA_DIR, "50_1000_0.json")
-
-    TSP_SOLVERS_DIR = os.path.join(BASE_PATH, "problems", "tsp", "minizinc")
-    TSP_INIT_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_init_circuit.mzn")
-    TSP_REPAIR_SOLVER_PATH = os.path.join(TSP_SOLVERS_DIR, "tsp_repair_circuit.mzn")
-
-    env = TSPEnvironmentMultiBinary(problem_path, TSP_INIT_SOLVER_PATH, TSP_REPAIR_SOLVER_PATH)
+    problem_path = os.path.join(CVRP_DATA_DIR, "generated", "train", "XML20_1123_00.json")
+    env = CVRPEnvironment(problem_path, CVRP_INIT_SOLVER_PATH, CVRP_REPAIR_SOLVER_PATH)
 
     obs, _ = env.reset()
 
-    graph_data = TSPEnvironmentMultiBinary.preprocess(obs)
+    graph_data = env.preprocess(obs)
 
-    net = GraphFeaturesExtractor(in_channels=3, num_heads=8, edge_dim=1, num_layers=3)
+    net = GraphFeaturesExtractor(in_channels=4, num_heads=8, edge_dim=1, num_layers=3, out_channels=1, residual=False)
     print(pyg.nn.summary(net, graph_data.x, graph_data.edge_index, graph_data.edge_attr))

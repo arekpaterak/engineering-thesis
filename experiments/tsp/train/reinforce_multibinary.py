@@ -60,6 +60,7 @@ class Args:
     processes: int = 1
     """the number of processes to use in MiniZinc"""
     fully_connected: bool = False
+    tsplib: bool = False
 
     # Neural Network specific arguments
     num_layers: int = 5
@@ -69,6 +70,7 @@ class Args:
     gat_v2: bool = False
     dropout: float = 0.0
     gumbel_topk: bool = False
+    residual: bool = False
 
     # Algorithm specific arguments
     learning_rate: float = 1e-3
@@ -81,7 +83,7 @@ class Args:
     """the entropy coefficient for the entropy regularization"""
     # proportion: float = 0.2
     # """the proportion of the nodes in the problem to destroy in one step"""
-    k: int = 4
+    k: int = 5
     """the number of the nodes to destroy in one step"""
     max_grad_norm: Optional[float] = None
     """the maximum norm for gradient clipping"""
@@ -116,7 +118,7 @@ class Policy(nn.Module):
 
         return torch.flatten(features)
 
-    def get_action(self, graph_data: pyg.data.Data, k: int, greedy: bool = False, gumbel_topk: bool = True) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def get_action(self, graph_data: pyg.data.Data, k: int, greedy: bool = False, gumbel_topk: bool = False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x, edge_index, edge_attr = graph_data.x, graph_data.edge_index, graph_data.edge_attr
 
         logits = self.forward(x, edge_index, edge_attr)
@@ -133,6 +135,7 @@ class Policy(nn.Module):
             if gumbel_topk:
                 z = -torch.log(-torch.log(torch.rand_like(prob)))
                 _, action_idx = torch.topk(torch.log(prob) + z, k)
+                print("gumbel")
             else:
                 action_idx = prob.multinomial(num_samples=k)
         else:
@@ -169,20 +172,24 @@ if __name__ == "__main__":
 
     # Filter instances
     training_instances_paths = []
-    match args.instances:
-        case int():
-            for path in problem_instances_paths:
-                size, _, idx = os.path.basename(path).rstrip(".json").strip().split("_")
-                size, idx = int(size), int(idx)
-                if size in args.problem_sizes and idx == args.instances:
-                    training_instances_paths.append(path)
-        case _:
-            index_range = range(args.instances[0], args.instances[1]+1)
-            for path in problem_instances_paths:
-                size, _, idx = os.path.basename(path).rstrip(".json").strip().split("_")
-                size, idx = int(size), int(idx)
-                if size in args.problem_sizes and idx in index_range:
-                    training_instances_paths.append(path)
+    if not args.tsplib:
+        match args.instances:
+            case int():
+                for path in problem_instances_paths:
+                    size, _, idx = os.path.basename(path).rstrip(".json").strip().split("_")
+                    size, idx = int(size), int(idx)
+                    if size in args.problem_sizes and idx == args.instances:
+                        training_instances_paths.append(path)
+            case _:
+                index_range = range(args.instances[0], args.instances[1]+1)
+                for path in problem_instances_paths:
+                    size, _, idx = os.path.basename(path).rstrip(".json").strip().split("_")
+                    size, idx = int(size), int(idx)
+                    if size in args.problem_sizes and idx in index_range:
+                        training_instances_paths.append(path)
+    else:
+        TSP_DATA_DIR = os.path.join(BASE_PATH, "problems", "tsp", "data", "tsplib")
+        training_instances_paths = [os.path.join(TSP_DATA_DIR, "eil51.json")]
 
     if args.debug:
         print("Training instances:", training_instances_paths)
@@ -207,6 +214,7 @@ if __name__ == "__main__":
         hidden_channels=args.hidden_channels,
         out_channels=args.out_channels,
         dropout=args.dropout,
+        residual=args.residual
     )
     model = Policy(
         features_extractor_kwargs=model_hparams,
@@ -315,7 +323,7 @@ if __name__ == "__main__":
             for log_prob, discounted_return in zip(log_probs, returns):
                 policy_loss.append(-log_prob * discounted_return)
 
-            policy_loss = torch.cat(policy_loss).mean()
+            policy_loss = torch.cat(policy_loss).sum()
             # As the regularization, the entropy should be maximized (which equals minimizing its negative)
             entropy = torch.cat(entropies).mean()
             total_loss = policy_loss - args.entropy_coefficient * entropy

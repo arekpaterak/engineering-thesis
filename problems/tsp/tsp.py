@@ -72,7 +72,7 @@ class TravelingSalesmanProblem(Problem):
         num_nodes = int(header_data['DIMENSION'])
 
         # Compute distance matrix
-        distance_matrix = np.zeros((num_nodes + 1, num_nodes + 1))
+        distance_matrix = np.zeros((num_nodes, num_nodes))
         for idx1, position1 in enumerate(node_positions):
             for idx2, position2 in enumerate(node_positions):
                 distance_matrix[idx1, idx2] = position1.distanceTo(position2)
@@ -81,7 +81,7 @@ class TravelingSalesmanProblem(Problem):
             num_nodes=num_nodes,
             node_positions=node_positions,
             distance_matrix=distance_matrix,
-            config={}
+            config={"max_coordinate": 100}
         )
 
     @classmethod
