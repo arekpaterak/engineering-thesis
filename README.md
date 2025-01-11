@@ -1,5 +1,7 @@
 # My Engineering Thesis
-Reinforcement learning for discrete optimization.
+
+Title: Finding Large Neighborhood Policies via Reinforcement
+Learning
 
 ## Running training and evaluation
 
